@@ -39,6 +39,26 @@
   .pct.d0{color:var(--bad)} .pct.d1{color:var(--warn)} .pct.d2{color:var(--ok)}
   .act button{padding:3px 8px;font-size:12px;border-radius:6px}
   .pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 2px;color:var(--tx2)}
+  /* ---- charts ---- */
+  .viz{--series-1:#3987e5;--grid:#252a34;--srf:var(--panel);
+       display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px;margin-bottom:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px 10px}
+  .card h3{margin:0;font-size:13px;font-weight:650}
+  .card .cap{margin:2px 0 10px;font-size:11px;color:var(--tx2)}
+  .card svg{display:block;width:100%;height:auto;overflow:visible}
+  .card .empty{color:var(--tx2);font-size:12px;padding:26px 0;text-align:center}
+  .bar{fill:var(--series-1)}
+  .bar:hover{opacity:.82}
+  .gl{stroke:var(--grid);stroke-width:1;shape-rendering:crispEdges}
+  .axl{fill:var(--tx2);font-size:10px}
+  .cat{fill:var(--tx);font-size:11px}
+  .val{fill:var(--tx2);font-size:10px;font-variant-numeric:tabular-nums}
+  #tip{position:fixed;pointer-events:none;background:#0b0d11;border:1px solid var(--line);
+       border-radius:7px;padding:7px 9px;font-size:12px;opacity:0;transition:opacity .09s;z-index:99;
+       box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:260px}
+  #tip b{color:var(--tx)} #tip .t2{color:var(--tx2);font-size:11px}
+  .vizhead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .vizhead label{cursor:pointer}
   .drop{border:2px dashed var(--line);border-radius:12px;padding:36px;text-align:center;color:var(--tx2);background:var(--panel)}
   .drop.over{border-color:var(--acc);color:var(--tx)}
   .hide{display:none}
@@ -55,6 +75,7 @@
   <button onclick="document.getElementById('file').click()">Load report</button>
 </header>
 
+<div id="tip"></div>
 <div class="wrap">
   <div id="dropzone" class="drop">
     Drop the <b>IdealPurchaseReport</b> file here, or click <b>Load report</b>.<br>
@@ -89,6 +110,12 @@
     </div>
 
     <div class="stats" id="stats"></div>
+
+    <div class="vizhead">
+      <label><input type="checkbox" id="showviz" checked> Show charts</label>
+      <span class="sub muted">— charts follow every filter above</span>
+    </div>
+    <div class="viz" id="viz"></div>
 
     <div class="tblwrap">
       <table>
@@ -254,8 +281,141 @@ function render(){
   document.getElementById('pinfo').textContent = `${VIEW.length? start+1:0}–${Math.min(start+PAGE, VIEW.length)} of ${VIEW.length}  ·  page ${page+1}/${pages}`;
   document.getElementById('prev').disabled = page<=0;
   document.getElementById('next').disabled = page>=pages-1;
+  drawCharts();
   save();
 }
+
+
+/* ---------- charts ---------- */
+const fmt = n => n>=1e6 ? (n/1e6).toFixed(1)+'M' : n>=1e3 ? (n/1e3).toFixed(1)+'k' : Math.round(n).toLocaleString();
+const tip = document.getElementById('tip');
+function tipOn(e,html){ tip.innerHTML=html; tip.style.opacity=1; tipMove(e); }
+function tipMove(e){
+  const r=tip.getBoundingClientRect();
+  tip.style.left = Math.min(e.clientX+14, innerWidth-r.width-10)+'px';
+  tip.style.top  = Math.min(e.clientY+14, innerHeight-r.height-10)+'px';
+}
+function tipOff(){ tip.style.opacity=0; }
+
+/* rounded only on the value end, square on the baseline */
+function hbar(x,y,w,h,r){
+  r=Math.min(r,w);
+  return `M${x},${y}h${w-r}a${r},${r} 0 0 1 ${r},${r}v${h-2*r}a${r},${r} 0 0 1 ${-r},${r}h${-(w-r)}z`;
+}
+function vbar(x,y,w,h,r){
+  r=Math.min(r,h,w/2);
+  return `M${x},${y+h}v${-(h-r)}a${r},${r} 0 0 1 ${r},${-r}h${w-2*r}a${r},${r} 0 0 1 ${r},${r}v${h-r}z`;
+}
+
+/* horizontal bars — one series, one color; value direct-labelled at the end */
+function barChart(el, rows, {title, cap, unit}){
+  if(!rows.length){ el.innerHTML = `<h3>${title}</h3><div class="cap">${cap}</div><div class="empty">No data</div>`; return; }
+  const LBL=138, PAD=8, RIGHT=52, BH=17, GAP=9;
+  const W=520, H=rows.length*(BH+GAP)+18;
+  const max=Math.max(...rows.map(r=>r.v))||1;
+  const plot=W-LBL-RIGHT;
+  const bars=rows.map((r,i)=>{
+    const y=i*(BH+GAP), w=Math.max(2, r.v/max*plot);
+    const label=r.k.length>22 ? r.k.slice(0,21)+'…' : r.k;
+    return `<text class="cat" x="${LBL-PAD}" y="${y+BH/2+4}" text-anchor="end">${esc(label)}</text>
+      <path class="bar" d="${hbar(LBL,y,w,BH,4)}"
+        data-t="<b>${esc(r.k)}</b><div class='t2'>${fmt(r.v)} ${unit}<br>${r.n.toLocaleString()} products</div>"></path>
+      <text class="val" x="${LBL+w+7}" y="${y+BH/2+4}">${fmt(r.v)}</text>`;
+  }).join('');
+  el.innerHTML = `<h3>${title}</h3><div class="cap">${cap}</div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${title}">
+      <line class="gl" x1="${LBL}" y1="0" x2="${LBL}" y2="${rows.length*(BH+GAP)-GAP}"/>${bars}</svg>`;
+}
+
+/* column histogram — ordered bands */
+function colChart(el, bins, {title, cap}){
+  const W=520, H=190, L=34, B=34, T=14, R=6;
+  const max=Math.max(...bins.map(b=>b.n))||1;
+  const pw=W-L-R, ph=H-B-T, bw=pw/bins.length;
+  const ticks=[0,.5,1].map(f=>{
+    const y=T+ph-f*ph;
+    return `<line class="gl" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/>
+            <text class="axl" x="${L-6}" y="${y+3}" text-anchor="end">${fmt(max*f)}</text>`;
+  }).join('');
+  const cols=bins.map((b,i)=>{
+    const h=Math.max(1, b.n/max*ph), x=L+i*bw+2, w=bw-4;
+    return `<path class="bar" d="${vbar(x,T+ph-h,w,h,4)}"
+        data-t="<b>${b.label==='zero'?'No sales at all':esc(b.label)+' of stock sold'}</b><div class='t2'>${b.n.toLocaleString()} products</div>"></path>
+      <text class="axl" x="${x+w/2}" y="${T+ph+14}" text-anchor="middle">${esc(b.short)}</text>
+      <text class="val" x="${x+w/2}" y="${T+ph-h-5}" text-anchor="middle">${b.n?fmt(b.n):''}</text>`;
+  }).join('');
+  el.innerHTML = `<h3>${title}</h3><div class="cap">${cap}</div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${title}">${ticks}${cols}
+      <text class="axl" x="${L+pw/2}" y="${H-3}" text-anchor="middle">sales as % of current stock</text></svg>`;
+}
+
+function group(rows, keyfn, valfn){
+  const m=new Map();
+  rows.forEach(r=>{
+    const k=(keyfn(r)||'').trim() || '(none)';
+    const o=m.get(k) || {k, v:0, n:0}; o.v+=valfn(r); o.n++; m.set(k,o);
+  });
+  return [...m.values()];
+}
+/* rank and keep the head; the tail is reported in the caption, not drawn as a
+   dominating "Other" bar that would outrank every real entry */
+function topN(list, n){
+  list.sort((a,b)=>b.v-a.v);
+  const head=list.slice(0,n), tail=list.slice(n);
+  head.rest = {count:tail.length, v:tail.reduce((s,o)=>s+o.v,0), total:list.length};
+  return head;
+}
+function tailCap(rows, noun, one){
+  const r=rows.rest;
+  if(!r || !r.count) return rows.length===1 ? `The only ${one}, by excess value`
+                                            : `All ${rows.length} ${noun}, by excess value`;
+  return `Top ${rows.length} of ${r.total} ${noun} — ${fmt(r.v)} more across the other ${r.count}`;
+}
+
+function drawCharts(){
+  const box=document.getElementById('viz');
+  if(!document.getElementById('showviz').checked){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  box.innerHTML = '<div class="card" id="c1"></div><div class="card" id="c2"></div><div class="card" id="c3"></div>';
+
+  const thr=num(document.getElementById('thr').value);
+  const mo=num(document.getElementById('months').value)||1;
+
+  /* drill into subcategories once a single category is pinned — a one-bar chart says nothing */
+  const catPinned = !!document.getElementById('fcat').value;
+  const byCat = topN(group(VIEW, r=>catPinned?r.sub:r.cat, r=>r.excess*r.cost), 8);
+  barChart(document.getElementById('c1'), byCat,
+    {title:'Where the money is stuck',
+     cap:tailCap(byCat, catPinned?'subcategories':'categories', catPinned?'subcategory':'category'),
+     unit:'excess value'});
+
+  /* bands: exact-zero, then equal splits up to the threshold */
+  const steps=5, w=thr/steps;
+  const bins=[{label:'zero', short:'none', n:VIEW.filter(r=>r.sales===0).length}];
+  for(let i=0;i<steps;i++){
+    const lo=i*w, hi=(i+1)*w;
+    bins.push({
+      label:`${lo.toFixed(0)}–${hi.toFixed(0)}%`, short:`≤${hi.toFixed(0)}%`,
+      n:VIEW.filter(r=>r.sales>0 && r.ratio>lo && r.ratio<=hi).length
+    });
+  }
+  colChart(document.getElementById('c2'), bins,
+    {title:'How dead is dead', cap:`Products by sell-through over ${mo} month${mo>1?'s':''}`});
+
+  const vendPinned = !!document.getElementById('fvend').value;
+  const byVend = topN(group(VIEW, r=>vendPinned?r.brand:r.vendor, r=>r.excess*r.cost), 10);
+  barChart(document.getElementById('c3'),  byVend,
+    {title: vendPinned?'What they sold you':'Who to talk to',
+     cap:tailCap(byVend, vendPinned?'brands':'vendors', vendPinned?'brand':'vendor'),
+     unit:'excess value'});
+
+  box.querySelectorAll('path[data-t]').forEach(el=>{
+    el.addEventListener('mouseenter',e=>tipOn(e, el.dataset.t));
+    el.addEventListener('mousemove',tipMove);
+    el.addEventListener('mouseleave',tipOff);
+  });
+}
+document.getElementById('showviz').addEventListener('change',drawCharts);
 
 /* ---------- events ---------- */
 document.getElementById('body').addEventListener('click',e=>{
