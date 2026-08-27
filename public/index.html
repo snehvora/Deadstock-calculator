@@ -4,78 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Deadstock / Overstock Calculator</title>
-<style>
-  :root{
-    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
-    --tx:#e6e9ef; --tx2:#9aa3b2; --acc:#4f8cff; --bad:#ff5c5c; --warn:#ffb020; --ok:#33c481;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--tx)}
-  header{padding:16px 20px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
-  .sub{color:var(--tx2);font-size:12px}
-  .wrap{padding:16px 20px}
-  .controls{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
-  .fld{display:flex;flex-direction:column;gap:5px}
-  label{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx2)}
-  input,select,button{font:inherit;background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:7px;padding:7px 9px;outline:none}
-  input:focus,select:focus{border-color:var(--acc)}
-  button{cursor:pointer}
-  button:hover{border-color:var(--acc)}
-  button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
-  .stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
-  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:130px}
-  .stat b{display:block;font-size:20px;font-weight:650;margin-top:2px}
-  .tblwrap{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:66vh;background:var(--panel)}
-  table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
-  th{position:sticky;top:0;background:var(--panel2);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;font-weight:600;z-index:2}
-  th.nos{cursor:default}
-  th span.ar{color:var(--acc);font-size:10px}
-  td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-  td.name{white-space:normal;min-width:220px;max-width:340px}
-  tr.flagged td{background:rgba(255,176,32,.10)}
-  .num{text-align:right;font-variant-numeric:tabular-nums}
-  .pct{font-weight:650}
-  .pct.d0{color:var(--bad)} .pct.d1{color:var(--warn)} .pct.d2{color:var(--ok)}
-  .act button{padding:3px 8px;font-size:12px;border-radius:6px}
-  .pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 2px;color:var(--tx2)}
-  /* ---- charts ---- */
-  .viz{--series-1:#3987e5;--grid:#252a34;--srf:var(--panel);
-       display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px;margin-bottom:14px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px 10px}
-  .card h3{margin:0;font-size:13px;font-weight:650}
-  .card .cap{margin:2px 0 10px;font-size:11px;color:var(--tx2)}
-  .card svg{display:block;width:100%;height:auto;overflow:visible}
-  .card .empty{color:var(--tx2);font-size:12px;padding:26px 0;text-align:center}
-  .bar{fill:var(--series-1)}
-  .bar:hover{opacity:.82}
-  .gl{stroke:var(--grid);stroke-width:1;shape-rendering:crispEdges}
-  .axl{fill:var(--tx2);font-size:10px}
-  .cat{fill:var(--tx);font-size:11px}
-  .val{fill:var(--tx2);font-size:10px;font-variant-numeric:tabular-nums}
-  #tip{position:fixed;pointer-events:none;background:#0b0d11;border:1px solid var(--line);
-       border-radius:7px;padding:7px 9px;font-size:12px;opacity:0;transition:opacity .09s;z-index:99;
-       box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:260px}
-  #tip b{color:var(--tx)} #tip .t2{color:var(--tx2);font-size:11px}
-  .vizhead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-  .vizhead label{cursor:pointer}
-  .drop{border:2px dashed var(--line);border-radius:12px;padding:36px;text-align:center;color:var(--tx2);background:var(--panel)}
-  .drop.over{border-color:var(--acc);color:var(--tx)}
-  .hide{display:none}
-  .muted{color:var(--tx2)}
-  .badge{font-size:11px;padding:2px 6px;border-radius:5px;background:var(--panel2);border:1px solid var(--line)}
-</style>
+<link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
+<div id="tip"></div>
 <header>
-  <h1>Deadstock / Overstock Calculator</h1>
+  <h1>Stock Planner</h1>
+  <nav>
+    <a href="index.html" class="on">Deadstock</a>
+    <a href="order.html">What to order</a>
+  </nav>
   <span class="sub" id="fileinfo">No file loaded</span>
   <span style="flex:1"></span>
   <input type="file" id="file" accept=".xls,.xlsx,.htm,.html,.csv" class="hide">
   <button onclick="document.getElementById('file').click()">Load report</button>
 </header>
 
-<div id="tip"></div>
 <div class="wrap">
   <div id="dropzone" class="drop">
     Drop the <b>IdealPurchaseReport</b> file here, or click <b>Load report</b>.<br>
@@ -105,6 +49,7 @@
           <option value="flag">Flagged only</option>
           <option value="unflag">Unflagged only</option>
         </select></div>
+      <div class="sep"></div>
       <div class="fld"><label>&nbsp;</label><button class="primary" id="export">Export CSV</button></div>
       <div class="fld"><label>&nbsp;</label><button id="reset">Reset removed/flags</button></div>
     </div>
@@ -118,10 +63,7 @@
     <div class="viz" id="viz"></div>
 
     <div class="tblwrap">
-      <table>
-        <thead><tr id="head"></tr></thead>
-        <tbody id="body"></tbody>
-      </table>
+      <table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
     </div>
     <div class="pager">
       <span id="pinfo"></span>
@@ -130,82 +72,22 @@
   </div>
 </div>
 
+<script src="assets/data.js"></script>
 <script>
 const PAGE = 200;
-let ROWS = [], VIEW = [], page = 0, sortKey = 'ratio', sortDir = 1;
+let VIEW = [], page = 0, sortKey = 'ratio', sortDir = 1;
 const removed = new Set(), flagged = new Set();
+const $ = id => document.getElementById(id);
 
-/* ---------- parsing ---------- */
-function parseCSV(text){
-  const out=[]; let row=[], cur='', q=false;
-  for(let i=0;i<text.length;i++){
-    const c=text[i];
-    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
-    else if(c==='"') q=true;
-    else if(c===','){ row.push(cur); cur=''; }
-    else if(c==='\n'){ row.push(cur); out.push(row); row=[]; cur=''; }
-    else if(c!=='\r') cur+=c;
-  }
-  if(cur!==''||row.length){ row.push(cur); out.push(row); }
-  return out;
-}
-function parseHTMLTable(text){
-  const doc = new DOMParser().parseFromString(text,'text/html');
-  const trs = doc.querySelectorAll('tr');
-  const out=[];
-  trs.forEach(tr=>{
-    const cs=[...tr.querySelectorAll('td,th')].map(td=>td.textContent.trim());
-    if(cs.length) out.push(cs);
-  });
-  return out;
-}
-function num(v){ const n=parseFloat(String(v??'').replace(/[, ]/g,'')); return isFinite(n)?n:0; }
-
-function ingest(matrix){
-  const head = matrix[0].map(h=>h.trim());
-  const idx = name => head.findIndex(h=>h.toLowerCase().replace(/[^a-z]/g,'')===name);
-  const iStock = idx('currentstockindefaultunit');
-  const iSales = idx('salesindefaultunit');
-  if(iStock<0 || iSales<0){
-    alert('Could not find "Current Stock In Default Unit" and "Sales In Default Unit" columns.');
-    return;
-  }
-  const col = {
-    id:idx('productid'), cat:idx('categoryname'), sub:idx('subcategoryname'),
-    brand:idx('brandname'), name:idx('productname'), unit:idx('unittype'),
-    vend:idx('purchasevendor'), cost:idx('lastpurchasepriceindefaultunit'),
-    pdate:idx('purchasedate')
-  };
-  const g=(r,i)=> i>=0 ? (r[i]||'') : '';
-  ROWS = matrix.slice(1).filter(r=>r.length>=head.length-2).map((r,n)=>{
-    const stock=num(r[iStock]), sales=num(r[iSales]);
-    return {
-      key: g(r,col.id) || ('row'+n),
-      id: g(r,col.id), cat:g(r,col.cat), sub:g(r,col.sub), brand:g(r,col.brand),
-      name:g(r,col.name), unit:g(r,col.unit), vendor:g(r,col.vend),
-      cost:num(g(r,col.cost)), pdate:g(r,col.pdate),
-      stock, sales,
-      ratio: stock>0 ? (sales/stock*100) : (sales>0?Infinity:0),
-      excess: stock - sales
-    };
-  });
-}
-
-/* ---------- filtering ---------- */
-function opts(sel, vals, label){
-  sel.innerHTML = `<option value="">All ${label}</option>` +
-    [...new Set(vals.filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
-}
-const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-
+/* ---------- the rule ----------
+   sales as a % of current stock over the chosen period; anything under the
+   threshold is dead or over-stocked. Zero-stock rows can't be overstock. */
 function compute(){
-  const thr = num(document.getElementById('thr').value);
-  const minstock = num(document.getElementById('minstock').value);
-  const cat = document.getElementById('fcat').value;
-  const brand = document.getElementById('fbrand').value;
-  const vend = document.getElementById('fvend').value;
-  const q = document.getElementById('q').value.trim().toLowerCase();
-  const mode = document.getElementById('showmode').value;
+  const thr=num($('thr').value), minstock=num($('minstock').value);
+  const cat=$('fcat').value, brand=$('fbrand').value, vend=$('fvend').value;
+  const q=$('q').value.trim().toLowerCase();
+  const mode=$('showmode').value;
+  const m=num($('months').value)||1;
 
   VIEW = ROWS.filter(r=>{
     if(removed.has(r.key)) return false;
@@ -219,18 +101,17 @@ function compute(){
     if(q && !((r.name+' '+r.id+' '+r.brand).toLowerCase().includes(q))) return false;
     return true;
   });
-  const m = num(document.getElementById('months').value)||1;
-  VIEW.forEach(r=>{ r.perMonth = r.sales/m; r.cover = r.perMonth>0 ? r.stock/r.perMonth : Infinity; });
+  VIEW.forEach(r=>{ r.perMonth=r.sales/m; r.cover = r.perMonth>0 ? r.stock/r.perMonth : Infinity; });
   VIEW.sort((a,b)=>{
     const x=a[sortKey], y=b[sortKey];
     if(typeof x==='string') return sortDir*x.localeCompare(y);
+    if(!isFinite(x)&&!isFinite(y)) return 0;
+    if(!isFinite(x)) return sortDir; if(!isFinite(y)) return -sortDir;
     return sortDir*((x===y)?0:(x<y?-1:1));
   });
-  page = 0;
-  render();
+  page=0; render();
 }
 
-/* ---------- render ---------- */
 const COLS = [
   ['id','ID',1],['name','Product',0],['brand','Brand',0],['cat','Category',0],
   ['unit','Unit',0],['stock','Stock',1],['sales','Sales',1],['ratio','Sales %',1],
@@ -238,14 +119,14 @@ const COLS = [
   ['cost','Unit cost',1],['deadValue','Dead value',1],['vendor','Vendor',0]
 ];
 function render(){
-  const thr = num(document.getElementById('thr').value);
-  document.getElementById('head').innerHTML =
-    COLS.map(c=>`<th data-k="${c[0]}" class="${c[2]?'num':''}">${c[1]}${sortKey===c[0]?' <span class="ar">'+(sortDir>0?'▲':'▼')+'</span>':''}</th>`).join('')
-    + '<th class="nos">Actions</th>';
+  const thr=num($('thr').value);
+  $('head').innerHTML = COLS.map(c=>
+    `<th data-k="${c[0]}" class="${c[2]?'num':''}">${c[1]}${sortKey===c[0]?' <span class="ar">'+(sortDir>0?'▲':'▼')+'</span>':''}</th>`
+  ).join('') + '<th class="nos">Actions</th>';
 
-  const start = page*PAGE, slice = VIEW.slice(start, start+PAGE);
-  document.getElementById('body').innerHTML = slice.map(r=>{
-    const dv = r.excess*r.cost;
+  const start=page*PAGE, slice=VIEW.slice(start,start+PAGE);
+  $('body').innerHTML = slice.map(r=>{
+    const dv=r.excess*r.cost;
     const cls = r.ratio<thr/3 ? 'd0' : (r.ratio<thr*2/3 ? 'd1' : 'd2');
     return `<tr class="${flagged.has(r.key)?'flagged':''}">
       <td class="num">${esc(r.id)}</td>
@@ -266,10 +147,10 @@ function render(){
       </td></tr>`;
   }).join('') || `<tr><td colspan="15" class="muted" style="padding:24px;text-align:center">No products match this rule.</td></tr>`;
 
-  const totDead = VIEW.reduce((s,r)=>s+r.excess*r.cost,0);
-  const totUnits = VIEW.reduce((s,r)=>s+r.excess,0);
-  const zero = VIEW.filter(r=>r.sales===0).length;
-  document.getElementById('stats').innerHTML = `
+  const totDead=VIEW.reduce((s,r)=>s+r.excess*r.cost,0);
+  const totUnits=VIEW.reduce((s,r)=>s+r.excess,0);
+  const zero=VIEW.filter(r=>r.sales===0).length;
+  $('stats').innerHTML = `
     <div class="stat"><label>Products in report</label><b>${ROWS.length.toLocaleString()}</b></div>
     <div class="stat"><label>Flagged as dead/over</label><b>${VIEW.length.toLocaleString()}</b></div>
     <div class="stat"><label>Zero sales</label><b>${zero.toLocaleString()}</b></div>
@@ -277,210 +158,105 @@ function render(){
     <div class="stat"><label>Excess value</label><b>${totDead.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
     <div class="stat"><label>Marked flag / removed</label><b>${flagged.size} / ${removed.size}</b></div>`;
 
-  const pages = Math.max(1, Math.ceil(VIEW.length/PAGE));
-  document.getElementById('pinfo').textContent = `${VIEW.length? start+1:0}–${Math.min(start+PAGE, VIEW.length)} of ${VIEW.length}  ·  page ${page+1}/${pages}`;
-  document.getElementById('prev').disabled = page<=0;
-  document.getElementById('next').disabled = page>=pages-1;
+  const pages=Math.max(1,Math.ceil(VIEW.length/PAGE));
+  $('pinfo').textContent = `${VIEW.length?start+1:0}–${Math.min(start+PAGE,VIEW.length)} of ${VIEW.length}  ·  page ${page+1}/${pages}`;
+  $('prev').disabled=page<=0; $('next').disabled=page>=pages-1;
   drawCharts();
   save();
 }
 
-
 /* ---------- charts ---------- */
-const fmt = n => n>=1e6 ? (n/1e6).toFixed(1)+'M' : n>=1e3 ? (n/1e3).toFixed(1)+'k' : Math.round(n).toLocaleString();
-const tip = document.getElementById('tip');
-function tipOn(e,html){ tip.innerHTML=html; tip.style.opacity=1; tipMove(e); }
-function tipMove(e){
-  const r=tip.getBoundingClientRect();
-  tip.style.left = Math.min(e.clientX+14, innerWidth-r.width-10)+'px';
-  tip.style.top  = Math.min(e.clientY+14, innerHeight-r.height-10)+'px';
-}
-function tipOff(){ tip.style.opacity=0; }
-
-/* rounded only on the value end, square on the baseline */
-function hbar(x,y,w,h,r){
-  r=Math.min(r,w);
-  return `M${x},${y}h${w-r}a${r},${r} 0 0 1 ${r},${r}v${h-2*r}a${r},${r} 0 0 1 ${-r},${r}h${-(w-r)}z`;
-}
-function vbar(x,y,w,h,r){
-  r=Math.min(r,h,w/2);
-  return `M${x},${y+h}v${-(h-r)}a${r},${r} 0 0 1 ${r},${-r}h${w-2*r}a${r},${r} 0 0 1 ${r},${r}v${h-r}z`;
-}
-
-/* horizontal bars — one series, one color; value direct-labelled at the end */
-function barChart(el, rows, {title, cap, unit}){
-  if(!rows.length){ el.innerHTML = `<h3>${title}</h3><div class="cap">${cap}</div><div class="empty">No data</div>`; return; }
-  const LBL=138, PAD=8, RIGHT=52, BH=17, GAP=9;
-  const W=520, H=rows.length*(BH+GAP)+18;
-  const max=Math.max(...rows.map(r=>r.v))||1;
-  const plot=W-LBL-RIGHT;
-  const bars=rows.map((r,i)=>{
-    const y=i*(BH+GAP), w=Math.max(2, r.v/max*plot);
-    const label=r.k.length>22 ? r.k.slice(0,21)+'…' : r.k;
-    return `<text class="cat" x="${LBL-PAD}" y="${y+BH/2+4}" text-anchor="end">${esc(label)}</text>
-      <path class="bar" d="${hbar(LBL,y,w,BH,4)}"
-        data-t="<b>${esc(r.k)}</b><div class='t2'>${fmt(r.v)} ${unit}<br>${r.n.toLocaleString()} products</div>"></path>
-      <text class="val" x="${LBL+w+7}" y="${y+BH/2+4}">${fmt(r.v)}</text>`;
-  }).join('');
-  el.innerHTML = `<h3>${title}</h3><div class="cap">${cap}</div>
-    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${title}">
-      <line class="gl" x1="${LBL}" y1="0" x2="${LBL}" y2="${rows.length*(BH+GAP)-GAP}"/>${bars}</svg>`;
-}
-
-/* column histogram — ordered bands */
-function colChart(el, bins, {title, cap}){
-  const W=520, H=190, L=34, B=34, T=14, R=6;
-  const max=Math.max(...bins.map(b=>b.n))||1;
-  const pw=W-L-R, ph=H-B-T, bw=pw/bins.length;
-  const ticks=[0,.5,1].map(f=>{
-    const y=T+ph-f*ph;
-    return `<line class="gl" x1="${L}" y1="${y}" x2="${W-R}" y2="${y}"/>
-            <text class="axl" x="${L-6}" y="${y+3}" text-anchor="end">${fmt(max*f)}</text>`;
-  }).join('');
-  const cols=bins.map((b,i)=>{
-    const h=Math.max(1, b.n/max*ph), x=L+i*bw+2, w=bw-4;
-    return `<path class="bar" d="${vbar(x,T+ph-h,w,h,4)}"
-        data-t="<b>${b.label==='zero'?'No sales at all':esc(b.label)+' of stock sold'}</b><div class='t2'>${b.n.toLocaleString()} products</div>"></path>
-      <text class="axl" x="${x+w/2}" y="${T+ph+14}" text-anchor="middle">${esc(b.short)}</text>
-      <text class="val" x="${x+w/2}" y="${T+ph-h-5}" text-anchor="middle">${b.n?fmt(b.n):''}</text>`;
-  }).join('');
-  el.innerHTML = `<h3>${title}</h3><div class="cap">${cap}</div>
-    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${title}">${ticks}${cols}
-      <text class="axl" x="${L+pw/2}" y="${H-3}" text-anchor="middle">sales as % of current stock</text></svg>`;
-}
-
-function group(rows, keyfn, valfn){
-  const m=new Map();
-  rows.forEach(r=>{
-    const k=(keyfn(r)||'').trim() || '(none)';
-    const o=m.get(k) || {k, v:0, n:0}; o.v+=valfn(r); o.n++; m.set(k,o);
-  });
-  return [...m.values()];
-}
-/* rank and keep the head; the tail is reported in the caption, not drawn as a
-   dominating "Other" bar that would outrank every real entry */
-function topN(list, n){
-  list.sort((a,b)=>b.v-a.v);
-  const head=list.slice(0,n), tail=list.slice(n);
-  head.rest = {count:tail.length, v:tail.reduce((s,o)=>s+o.v,0), total:list.length};
-  return head;
-}
-function tailCap(rows, noun, one){
-  const r=rows.rest;
-  if(!r || !r.count) return rows.length===1 ? `The only ${one}, by excess value`
-                                            : `All ${rows.length} ${noun}, by excess value`;
-  return `Top ${rows.length} of ${r.total} ${noun} — ${fmt(r.v)} more across the other ${r.count}`;
-}
-
 function drawCharts(){
-  const box=document.getElementById('viz');
-  if(!document.getElementById('showviz').checked){ box.classList.add('hide'); return; }
+  const box=$('viz');
+  if(!$('showviz').checked){ box.classList.add('hide'); return; }
   box.classList.remove('hide');
-  box.innerHTML = '<div class="card" id="c1"></div><div class="card" id="c2"></div><div class="card" id="c3"></div>';
+  box.innerHTML='<div class="card" id="c1"></div><div class="card" id="c2"></div><div class="card" id="c3"></div>';
 
-  const thr=num(document.getElementById('thr').value);
-  const mo=num(document.getElementById('months').value)||1;
+  const thr=num($('thr').value), mo=num($('months').value)||1;
 
   /* drill into subcategories once a single category is pinned — a one-bar chart says nothing */
-  const catPinned = !!document.getElementById('fcat').value;
-  const byCat = topN(group(VIEW, r=>catPinned?r.sub:r.cat, r=>r.excess*r.cost), 8);
-  barChart(document.getElementById('c1'), byCat,
-    {title:'Where the money is stuck',
-     cap:tailCap(byCat, catPinned?'subcategories':'categories', catPinned?'subcategory':'category'),
-     unit:'excess value'});
+  const catPinned=!!$('fcat').value;
+  const byCat=topN(group(VIEW, r=>catPinned?r.sub:r.cat, r=>r.excess*r.cost), 8);
+  barChart($('c1'), byCat, {title:'Where the money is stuck',
+    cap:tailCap(byCat, catPinned?'subcategories':'categories', catPinned?'subcategory':'category','excess value'),
+    unit:'excess value'});
 
-  /* bands: exact-zero, then equal splits up to the threshold */
   const steps=5, w=thr/steps;
-  const bins=[{label:'zero', short:'none', n:VIEW.filter(r=>r.sales===0).length}];
+  const bins=[{short:'none', n:VIEW.filter(r=>r.sales===0).length,
+    tip:`<b>No sales at all</b><div class='t2'>${VIEW.filter(r=>r.sales===0).length.toLocaleString()} products</div>`}];
   for(let i=0;i<steps;i++){
     const lo=i*w, hi=(i+1)*w;
-    bins.push({
-      label:`${lo.toFixed(0)}–${hi.toFixed(0)}%`, short:`≤${hi.toFixed(0)}%`,
-      n:VIEW.filter(r=>r.sales>0 && r.ratio>lo && r.ratio<=hi).length
-    });
+    const n=VIEW.filter(r=>r.sales>0 && r.ratio>lo && r.ratio<=hi).length;
+    bins.push({short:`≤${hi.toFixed(0)}%`, n,
+      tip:`<b>${lo.toFixed(0)}–${hi.toFixed(0)}% of stock sold</b><div class='t2'>${n.toLocaleString()} products</div>`});
   }
-  colChart(document.getElementById('c2'), bins,
-    {title:'How dead is dead', cap:`Products by sell-through over ${mo} month${mo>1?'s':''}`});
+  colChart($('c2'), bins, {title:'How dead is dead',
+    cap:`Products by sell-through over ${mo} month${mo>1?'s':''}`, xlab:'sales as % of current stock'});
 
-  const vendPinned = !!document.getElementById('fvend').value;
-  const byVend = topN(group(VIEW, r=>vendPinned?r.brand:r.vendor, r=>r.excess*r.cost), 10);
-  barChart(document.getElementById('c3'),  byVend,
-    {title: vendPinned?'What they sold you':'Who to talk to',
-     cap:tailCap(byVend, vendPinned?'brands':'vendors', vendPinned?'brand':'vendor'),
-     unit:'excess value'});
+  const vendPinned=!!$('fvend').value;
+  const byVend=topN(group(VIEW, r=>vendPinned?r.brand:r.vendor, r=>r.excess*r.cost), 10);
+  barChart($('c3'), byVend, {title:vendPinned?'What they sold you':'Who to talk to',
+    cap:tailCap(byVend, vendPinned?'brands':'vendors', vendPinned?'brand':'vendor','excess value'),
+    unit:'excess value'});
 
-  box.querySelectorAll('path[data-t]').forEach(el=>{
-    el.addEventListener('mouseenter',e=>tipOn(e, el.dataset.t));
-    el.addEventListener('mousemove',tipMove);
-    el.addEventListener('mouseleave',tipOff);
-  });
+  bindTips(box);
 }
-document.getElementById('showviz').addEventListener('change',drawCharts);
 
 /* ---------- events ---------- */
-document.getElementById('body').addEventListener('click',e=>{
+$('body').addEventListener('click',e=>{
   const f=e.target.dataset.flag, r=e.target.dataset.rm;
   if(f){ flagged.has(f)?flagged.delete(f):flagged.add(f); compute(); }
   if(r){ removed.add(r); compute(); }
 });
-document.getElementById('head').addEventListener('click',e=>{
+$('head').addEventListener('click',e=>{
   const k=e.target.closest('th')?.dataset.k; if(!k) return;
   if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=1;}
   compute();
 });
 ['months','thr','minstock','fcat','fbrand','fvend','q','showmode'].forEach(id=>{
-  const el=document.getElementById(id);
+  const el=$(id);
   el.addEventListener(el.tagName==='SELECT'?'change':'input', compute);
 });
-document.getElementById('prev').onclick=()=>{page--;render();};
-document.getElementById('next').onclick=()=>{page++;render();};
-document.getElementById('reset').onclick=()=>{ if(confirm('Clear all flags and restore removed rows?')){removed.clear();flagged.clear();compute();} };
-document.getElementById('export').onclick=()=>{
-  const head=['Product ID','Product Name','Brand','Category','Subcategory','Unit','Stock','Sales','Sales %','Excess','Sales per month','Months cover','Unit cost','Excess value','Vendor','Flagged'];
-  const lines=[head.join(',')].concat(VIEW.map(r=>[
-    r.id,r.name,r.brand,r.cat,r.sub,r.unit,r.stock,r.sales,r.ratio.toFixed(2),r.excess.toFixed(2),
-    r.perMonth.toFixed(2),isFinite(r.cover)?r.cover.toFixed(1):'',r.cost,(r.excess*r.cost).toFixed(2),
-    r.vendor,flagged.has(r.key)?'YES':''
-  ].map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')));
-  const url=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'}));
-  const a=document.createElement('a'); a.href=url;
-  a.download=`deadstock_${document.getElementById('thr').value}pct_${document.getElementById('months').value}mo.csv`;
-  a.click(); URL.revokeObjectURL(url);
+$('showviz').addEventListener('change',drawCharts);
+$('prev').onclick=()=>{page--;render();};
+$('next').onclick=()=>{page++;render();};
+$('reset').onclick=()=>{ if(confirm('Clear all flags and restore removed rows?')){removed.clear();flagged.clear();compute();} };
+$('export').onclick=()=>{
+  downloadCSV(
+    `deadstock_${$('thr').value}pct_${$('months').value}mo.csv`,
+    ['Product ID','Product Name','Brand','Category','Subcategory','Unit','Stock','Sales','Sales %',
+     'Excess','Sales per month','Months cover','Unit cost','Excess value','Vendor','Flagged'],
+    VIEW.map(r=>[r.id,r.name,r.brand,r.cat,r.sub,r.unit,r.stock,r.sales,r.ratio.toFixed(2),
+      r.excess.toFixed(2),r.perMonth.toFixed(2),isFinite(r.cover)?r.cover.toFixed(1):'',
+      r.cost,(r.excess*r.cost).toFixed(2),r.vendor,flagged.has(r.key)?'YES':''])
+  );
 };
 
 /* ---------- persistence ---------- */
 function save(){ try{ localStorage.setItem('dsc',JSON.stringify({r:[...removed],f:[...flagged]})); }catch(e){} }
-function load(){ try{ const s=JSON.parse(localStorage.getItem('dsc')||'{}');
-  (s.r||[]).forEach(k=>removed.add(k)); (s.f||[]).forEach(k=>flagged.add(k)); }catch(e){} }
+function loadState(){ try{
+  const s=JSON.parse(localStorage.getItem('dsc')||'{}');
+  (s.r||[]).forEach(k=>removed.add(k)); (s.f||[]).forEach(k=>flagged.add(k));
+}catch(e){} }
 
-/* ---------- file loading ---------- */
-function handle(file){
-  const fr=new FileReader();
-  fr.onload=()=>{
-    const text=fr.result;
-    let matrix;
-    if(/\.csv$/i.test(file.name)) matrix=parseCSV(text);
-    else if(/<t[rd]/i.test(text)) matrix=parseHTMLTable(text);
-    else { alert('Unsupported file. Export the report as .xls (HTML) or .csv.'); return; }
-    if(!matrix || matrix.length<2){ alert('No rows found in file.'); return; }
-    ingest(matrix);
-    if(!ROWS.length) return;
-    document.getElementById('fileinfo').textContent = `${file.name} — ${ROWS.length.toLocaleString()} products`;
-    document.getElementById('dropzone').classList.add('hide');
-    document.getElementById('app').classList.remove('hide');
-    opts(document.getElementById('fcat'), ROWS.map(r=>r.cat),'categories');
-    opts(document.getElementById('fbrand'), ROWS.map(r=>r.brand),'brands');
-    opts(document.getElementById('fvend'), ROWS.map(r=>r.vendor),'vendors');
-    load(); compute();
-  };
-  fr.readAsText(file);
+/* ---------- boot ---------- */
+function opts(sel, vals, label){
+  sel.innerHTML = `<option value="">All ${label}</option>` +
+    [...new Set(vals.filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
 }
-document.getElementById('file').addEventListener('change',e=>{ if(e.target.files[0]) handle(e.target.files[0]); });
-const dz=document.getElementById('dropzone');
-['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('over');}));
-['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('over');}));
-dz.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) handle(f); });
-dz.addEventListener('click',()=>document.getElementById('file').click());
+function start(name){
+  $('fileinfo').textContent = `${name} — ${ROWS.length.toLocaleString()} products`;
+  $('dropzone').classList.add('hide');
+  $('app').classList.remove('hide');
+  opts($('fcat'),  ROWS.map(r=>r.cat),'categories');
+  opts($('fbrand'),ROWS.map(r=>r.brand),'brands');
+  opts($('fvend'), ROWS.map(r=>r.vendor),'vendors');
+  loadState(); compute();
+}
+tipInit();
+wireLoader({input:$('file'), dropzone:$('dropzone'), onload:start});
+const cached = loadCachedReport();
+if(cached) start(cached);
 </script>
 </body>
 </html>

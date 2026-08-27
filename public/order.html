@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purchase Order Builder</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<div id="tip"></div>
+<header>
+  <h1>Stock Planner</h1>
+  <nav>
+    <a href="index.html">Deadstock</a>
+    <a href="order.html" class="on">What to order</a>
+  </nav>
+  <span class="sub" id="fileinfo">No file loaded</span>
+  <span style="flex:1"></span>
+  <input type="file" id="file" accept=".xls,.xlsx,.htm,.html,.csv" class="hide">
+  <button onclick="document.getElementById('file').click()">Load report</button>
+</header>
+
+<div class="wrap">
+  <div id="dropzone" class="drop">
+    Drop the <b>IdealPurchaseReport</b> file here, or click <b>Load report</b>.<br>
+    <span class="sub">Supports the exported .xls (HTML table) and .csv. Everything stays on your machine.</span>
+  </div>
+
+  <div id="app" class="hide">
+    <div class="controls">
+      <div class="fld"><label>Period of data</label>
+        <select id="months">
+          <option value="1">1 month</option><option value="2">2 months</option>
+          <option value="3" selected>3 months</option><option value="4">4 months</option>
+          <option value="6">6 months</option><option value="9">9 months</option>
+          <option value="12">12 months</option>
+        </select></div>
+      <div class="fld"><label>Order enough for</label>
+        <select id="cover">
+          <option value="0.5">2 weeks</option><option value="1" selected>1 month</option>
+          <option value="1.5">6 weeks</option><option value="2">2 months</option>
+          <option value="3">3 months</option>
+        </select></div>
+      <div class="fld"><label>Reorder when cover below</label>
+        <select id="trigger">
+          <option value="0.25">1 week</option><option value="0.5" selected>2 weeks</option>
+          <option value="1">1 month</option><option value="2">2 months</option>
+          <option value="999">any shortfall</option>
+        </select></div>
+      <div class="sep"></div>
+      <div class="fld"><label>Min sales in period</label>
+        <input type="number" id="minsales" value="1" min="0" step="1" style="width:80px"></div>
+      <div class="fld"><label>Round up to</label>
+        <select id="round">
+          <option value="none" selected>No rounding</option>
+          <option value="whole">Whole units</option>
+          <option value="box">Full box</option>
+          <option value="case">Full case</option>
+        </select></div>
+      <div class="fld"><label>Vendor</label><select id="fvend"></select></div>
+      <div class="fld"><label>Category</label><select id="fcat"></select></div>
+      <div class="fld"><label>Brand</label><select id="fbrand"></select></div>
+      <div class="fld"><label>Search</label><input id="q" placeholder="product / id" style="width:170px"></div>
+      <div class="fld"><label>Vendor known</label>
+        <select id="hasvend">
+          <option value="any" selected>Any</option>
+          <option value="yes">Has a vendor</option>
+          <option value="no">No vendor on file</option>
+        </select></div>
+      <div class="fld"><label>Group</label>
+        <select id="grp">
+          <option value="none" selected>Flat list</option>
+          <option value="vendor">By vendor</option>
+        </select></div>
+      <div class="sep"></div>
+      <div class="fld"><label>&nbsp;</label><button class="primary" id="export">Export PO (CSV)</button></div>
+      <div class="fld"><label>&nbsp;</label><button id="reset">Reset edits</button></div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="vizhead">
+      <label><input type="checkbox" id="showviz" checked> Show charts</label>
+      <span class="sub muted">— charts follow every filter above</span>
+    </div>
+    <div class="viz" id="viz"></div>
+
+    <div class="tblwrap">
+      <table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
+    </div>
+    <div class="pager">
+      <span id="pinfo"></span>
+      <button id="prev">Prev</button><button id="next">Next</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/data.js"></script>
+<script>
+const PAGE = 200;
+let VIEW = [], page = 0, sortKey = 'orderValue', sortDir = -1;
+const dropped = new Set();     // rows taken off the PO
+const manual  = new Map();     // key -> hand-edited order qty
+
+const $ = id => document.getElementById(id);
+
+/* ---------- the rule ----------
+   sales/month over the chosen period sets the demand rate. Target stock is that
+   rate held for the "order enough for" horizon; the shortfall against current
+   stock is the suggested order. Items are only suggested once their remaining
+   cover drops below the reorder trigger. */
+function compute(){
+  const mo      = num($('months').value)||1;
+  const coverFor= num($('cover').value);
+  const trigger = num($('trigger').value);
+  const minsales= num($('minsales').value);
+  const rounding= $('round').value;
+  const vend=$('fvend').value, cat=$('fcat').value, brand=$('fbrand').value;
+  const hasvend=$('hasvend').value;
+  const q=$('q').value.trim().toLowerCase();
+
+  VIEW = [];
+  for(const r of ROWS){
+    if(dropped.has(r.key)) continue;
+    if(r.sales < minsales || r.sales <= 0) continue;      // no demand, nothing to reorder
+    const perMonth = r.sales/mo;
+    const cover = perMonth>0 ? r.stock/perMonth : Infinity;
+    if(cover >= trigger) continue;                        // still covered
+    const target = perMonth*coverFor;
+    let qty = target - r.stock;
+    if(qty <= 0) continue;
+
+    const perPiece = r.perDefault||1;                      // pieces in one default unit
+    const boxDef  = r.boxSize>0  ? r.boxSize/perPiece  : 0;   // default units per box
+    const caseDef = r.caseSize>0 ? r.caseSize/perPiece : 0;   // default units per case
+    if(rounding==='whole') qty = Math.ceil(qty);
+    else if(rounding==='box'  && boxDef>0)  qty = Math.ceil(qty/boxDef)*boxDef;
+    else if(rounding==='case' && caseDef>0) qty = Math.ceil(qty/caseDef)*caseDef;
+
+    if(vend && r.vendor!==vend) continue;
+    if(cat && r.cat!==cat) continue;
+    if(brand && r.brand!==brand) continue;
+    if(hasvend==='yes' && !r.vendor) continue;
+    if(hasvend==='no'  && r.vendor) continue;
+    if(q && !((r.name+' '+r.id+' '+r.brand).toLowerCase().includes(q))) continue;
+
+    const suggested = qty;
+    const final = manual.has(r.key) ? manual.get(r.key) : suggested;
+    VIEW.push(Object.assign(Object.create(r), r, {
+      perMonth, cover, target, suggested, qty:final,
+      boxes: boxDef>0 ? final/boxDef : 0,
+      cases: caseDef>0 ? final/caseDef : 0,
+      orderValue: final*r.cost
+    }));
+  }
+
+  const cmp=(a,b)=>{
+    const x=a[sortKey], y=b[sortKey];
+    if(typeof x==='string') return sortDir*x.localeCompare(y);
+    if(!isFinite(x)&&!isFinite(y)) return 0;
+    if(!isFinite(x)) return sortDir; if(!isFinite(y)) return -sortDir;
+    return sortDir*((x===y)?0:(x<y?-1:1));
+  };
+  if($('grp').value==='vendor'){
+    /* vendor blocks must stay contiguous, so vendor leads and the chosen sort
+       orders the lines inside each block. Vendors themselves rank by spend. */
+    const spend=new Map();
+    VIEW.forEach(r=>spend.set(r.vendor||'', (spend.get(r.vendor||'')||0)+r.orderValue));
+    VIEW.sort((a,b)=>{
+      const va=a.vendor||'', vb=b.vendor||'';
+      if(va!==vb) return (spend.get(vb)-spend.get(va)) || va.localeCompare(vb);
+      return cmp(a,b);
+    });
+  } else VIEW.sort(cmp);
+  page=0; render();
+}
+
+/* ---------- table ---------- */
+const COLS = [
+  ['id','ID',1],['name','Product',0],['brand','Brand',0],['vendor','Vendor',0],
+  ['unit','Unit',1],['stock','Stock',1],['sales','Sales',1],['perMonth','Sales / mo',1],
+  ['cover','Cover (mo)',1],['target','Target',1],['suggested','Suggested',1],
+  ['qty','Order qty',1],['cases','Cases',1],['cost','Unit cost',1],['orderValue','Order value',1]
+];
+function render(){
+  const trigger=num($('trigger').value);
+  $('head').innerHTML = COLS.map(c=>
+    `<th data-k="${c[0]}" class="${c[2]?'num':''}">${c[1]}${sortKey===c[0]?' <span class="ar">'+(sortDir>0?'▲':'▼')+'</span>':''}</th>`
+  ).join('') + '<th class="nos">Actions</th>';
+
+  const start=page*PAGE, slice=VIEW.slice(start,start+PAGE);
+  const grouped = $('grp').value==='vendor';
+  let last=null, html='';
+  if(!slice.length){
+    html = `<tr><td colspan="16" class="muted" style="padding:24px;text-align:center">Nothing needs ordering under these rules.</td></tr>`;
+  }
+  for(const r of slice){
+    if(grouped && r.vendor!==last){
+      last=r.vendor;
+      const g=VIEW.filter(x=>x.vendor===last);
+      html += `<tr class="vend"><td colspan="16">${esc(last||'(no vendor on file)')}
+        <span class="muted" style="font-weight:400"> — ${g.length} lines, ${fmt(g.reduce((s,x)=>s+x.orderValue,0))} order value</span></td></tr>`;
+    }
+    const urgent = r.cover < trigger/2;
+    html += `<tr>
+      <td class="num">${esc(r.id)}</td>
+      <td class="name">${esc(r.name)}<div class="muted" style="font-size:11px">${esc(r.cat)} · ${esc(r.sub)}</div></td>
+      <td>${esc(r.brand)}</td>
+      <td>${esc(r.vendor)||'<span class="muted">—</span>'}</td>
+      <td class="num">${esc(r.unit)}</td>
+      <td class="num">${r.stock.toFixed(2)}</td>
+      <td class="num">${r.sales.toFixed(2)}</td>
+      <td class="num">${r.perMonth.toFixed(2)}</td>
+      <td class="num pct ${urgent?'d0':'d1'}">${isFinite(r.cover)?r.cover.toFixed(2):'∞'}</td>
+      <td class="num">${r.target.toFixed(2)}</td>
+      <td class="num muted">${r.suggested.toFixed(2)}</td>
+      <td class="num"><input class="qty ${manual.has(r.key)?'edited':''}" type="number" min="0" step="1"
+           value="${(+r.qty.toFixed(2))}" data-q="${esc(r.key)}"></td>
+      <td class="num">${r.cases?r.cases.toFixed(2):'—'}</td>
+      <td class="num">${r.cost?r.cost.toFixed(2):'—'}</td>
+      <td class="num">${r.orderValue?r.orderValue.toFixed(2):'—'}</td>
+      <td class="act"><button data-rm="${esc(r.key)}">Remove</button></td></tr>`;
+  }
+  $('body').innerHTML = html;
+
+  const val=VIEW.reduce((s,r)=>s+r.orderValue,0);
+  const units=VIEW.reduce((s,r)=>s+r.qty,0);
+  const vendors=new Set(VIEW.map(r=>r.vendor||'(none)')).size;
+  const novend=VIEW.filter(r=>!r.vendor).length;
+  $('stats').innerHTML = `
+    <div class="stat hero"><label>Order value</label><b>${val.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
+    <div class="stat"><label>Lines to order</label><b>${VIEW.length.toLocaleString()}</b></div>
+    <div class="stat"><label>Units</label><b>${units.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
+    <div class="stat"><label>Vendors</label><b>${vendors}</b></div>
+    <div class="stat"><label>No vendor on file</label><b>${novend}</b></div>
+    <div class="stat"><label>Edited / removed</label><b>${manual.size} / ${dropped.size}</b></div>`;
+
+  const pages=Math.max(1,Math.ceil(VIEW.length/PAGE));
+  $('pinfo').textContent = `${VIEW.length?start+1:0}–${Math.min(start+PAGE,VIEW.length)} of ${VIEW.length}  ·  page ${page+1}/${pages}`;
+  $('prev').disabled = page<=0; $('next').disabled = page>=pages-1;
+  drawCharts();
+  save();
+}
+
+/* ---------- charts ---------- */
+function drawCharts(){
+  const box=$('viz');
+  if(!$('showviz').checked){ box.classList.add('hide'); return; }
+  box.classList.remove('hide');
+  box.innerHTML='<div class="card" id="c1"></div><div class="card" id="c2"></div><div class="card" id="c3"></div>';
+
+  const vendPinned = !!$('fvend').value;
+  const byVend = topN(group(VIEW, r=>vendPinned?r.brand:r.vendor, r=>r.orderValue), 10);
+  barChart($('c1'), byVend, {
+    title: vendPinned?'Spend by brand':'Spend by vendor',
+    cap: tailCap(byVend, vendPinned?'brands':'vendors', vendPinned?'brand':'vendor','order value'),
+    unit:'order value'});
+
+  const catPinned = !!$('fcat').value;
+  const byCat = topN(group(VIEW, r=>catPinned?r.sub:r.cat, r=>r.orderValue), 8);
+  barChart($('c2'), byCat, {
+    title:'Spend by category',
+    cap: tailCap(byCat, catPinned?'subcategories':'categories', catPinned?'subcategory':'category','order value'),
+    unit:'order value'});
+
+  /* how urgent is the list — weeks of cover left */
+  const bands=[
+    ['Out',   r=>r.stock<=0],
+    ['<1 wk', r=>r.stock>0 && r.cover<0.25],
+    ['1–2 wk',r=>r.cover>=0.25 && r.cover<0.5],
+    ['2–4 wk',r=>r.cover>=0.5  && r.cover<1],
+    ['1–2 mo',r=>r.cover>=1    && r.cover<2],
+    ['2 mo+', r=>r.cover>=2]
+  ];
+  const bins=bands.map(([short,f])=>{
+    const rows=VIEW.filter(f);
+    return {short, n:rows.length,
+      tip:`<b>${short} of stock left</b><div class='t2'>${rows.length.toLocaleString()} lines<br>${fmt(rows.reduce((s,r)=>s+r.orderValue,0))} order value</div>`};
+  }).filter(b=>b.n>0 || true);
+  colChart($('c3'), bins, {title:'How urgent', cap:'Lines by stock cover remaining', xlab:'cover left at current sales rate'});
+
+  bindTips(box);
+}
+
+/* ---------- events ---------- */
+$('body').addEventListener('click',e=>{
+  const k=e.target.dataset.rm;
+  if(k){ dropped.add(k); manual.delete(k); compute(); }
+});
+$('body').addEventListener('change',e=>{
+  const k=e.target.dataset.q;
+  if(k!==undefined){
+    const v=Math.max(0,num(e.target.value));
+    const row=VIEW.find(r=>r.key===k);
+    if(row && Math.abs(v-row.suggested)<1e-9) manual.delete(k); else manual.set(k,v);
+    compute();
+  }
+});
+$('head').addEventListener('click',e=>{
+  const k=e.target.closest('th')?.dataset.k; if(!k) return;
+  if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;}
+  compute();
+});
+['months','cover','trigger','minsales','round','fvend','fcat','fbrand','q','hasvend','grp'].forEach(id=>{
+  const el=$(id);
+  el.addEventListener(el.tagName==='SELECT'?'change':'input', compute);
+});
+$('showviz').addEventListener('change',drawCharts);
+$('prev').onclick=()=>{page--;render();};
+$('next').onclick=()=>{page++;render();};
+$('reset').onclick=()=>{ if(confirm('Clear manual quantities and restore removed lines?')){manual.clear();dropped.clear();compute();} };
+$('export').onclick=()=>{
+  if(!VIEW.length){ alert('Nothing to export.'); return; }
+  const rows=[...VIEW].sort((a,b)=>(a.vendor||'~').localeCompare(b.vendor||'~') || b.orderValue-a.orderValue);
+  downloadCSV(
+    `purchase_order_${$('cover').value}mo_cover.csv`,
+    ['Vendor','Product ID','Product Name','Brand','Category','Unit','Current stock','Sales in period',
+     'Sales per month','Cover (months)','Target stock','Suggested qty','Order qty','Cases','Unit cost','Order value'],
+    rows.map(r=>[r.vendor,r.id,r.name,r.brand,r.cat,r.unit,r.stock,r.sales,r.perMonth.toFixed(2),
+      isFinite(r.cover)?r.cover.toFixed(2):'',r.target.toFixed(2),r.suggested.toFixed(2),
+      (+r.qty.toFixed(2)),r.cases?r.cases.toFixed(2):'',r.cost,r.orderValue.toFixed(2)])
+  );
+};
+
+/* ---------- persistence ---------- */
+function save(){ try{ localStorage.setItem('po',JSON.stringify({d:[...dropped],m:[...manual]})); }catch(e){} }
+function loadState(){ try{
+  const s=JSON.parse(localStorage.getItem('po')||'{}');
+  (s.d||[]).forEach(k=>dropped.add(k)); (s.m||[]).forEach(([k,v])=>manual.set(k,v));
+}catch(e){} }
+
+/* ---------- boot ---------- */
+function opts(sel, vals, label){
+  sel.innerHTML = `<option value="">All ${label}</option>` +
+    [...new Set(vals.filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
+}
+function start(name){
+  $('fileinfo').textContent = `${name} — ${ROWS.length.toLocaleString()} products`;
+  $('dropzone').classList.add('hide');
+  $('app').classList.remove('hide');
+  opts($('fvend'), ROWS.map(r=>r.vendor),'vendors');
+  opts($('fcat'),  ROWS.map(r=>r.cat),'categories');
+  opts($('fbrand'),ROWS.map(r=>r.brand),'brands');
+  loadState(); compute();
+}
+tipInit();
+wireLoader({input:$('file'), dropzone:$('dropzone'), onload:start});
+const cached = loadCachedReport();
+if(cached) start(cached);
+</script>
+</body>
+</html>
