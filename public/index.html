@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deadstock / Overstock Calculator</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --tx:#e6e9ef; --tx2:#9aa3b2; --acc:#4f8cff; --bad:#ff5c5c; --warn:#ffb020; --ok:#33c481;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--tx)}
+  header{padding:16px 20px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
+  .sub{color:var(--tx2);font-size:12px}
+  .wrap{padding:16px 20px}
+  .controls{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+  .fld{display:flex;flex-direction:column;gap:5px}
+  label{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx2)}
+  input,select,button{font:inherit;background:var(--panel2);color:var(--tx);border:1px solid var(--line);border-radius:7px;padding:7px 9px;outline:none}
+  input:focus,select:focus{border-color:var(--acc)}
+  button{cursor:pointer}
+  button:hover{border-color:var(--acc)}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+  .stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:130px}
+  .stat b{display:block;font-size:20px;font-weight:650;margin-top:2px}
+  .tblwrap{border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:66vh;background:var(--panel)}
+  table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+  th{position:sticky;top:0;background:var(--panel2);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;font-weight:600;z-index:2}
+  th.nos{cursor:default}
+  th span.ar{color:var(--acc);font-size:10px}
+  td{padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td.name{white-space:normal;min-width:220px;max-width:340px}
+  tr.flagged td{background:rgba(255,176,32,.10)}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .pct{font-weight:650}
+  .pct.d0{color:var(--bad)} .pct.d1{color:var(--warn)} .pct.d2{color:var(--ok)}
+  .act button{padding:3px 8px;font-size:12px;border-radius:6px}
+  .pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 2px;color:var(--tx2)}
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:36px;text-align:center;color:var(--tx2);background:var(--panel)}
+  .drop.over{border-color:var(--acc);color:var(--tx)}
+  .hide{display:none}
+  .muted{color:var(--tx2)}
+  .badge{font-size:11px;padding:2px 6px;border-radius:5px;background:var(--panel2);border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Deadstock / Overstock Calculator</h1>
+  <span class="sub" id="fileinfo">No file loaded</span>
+  <span style="flex:1"></span>
+  <input type="file" id="file" accept=".xls,.xlsx,.htm,.html,.csv" class="hide">
+  <button onclick="document.getElementById('file').click()">Load report</button>
+</header>
+
+<div class="wrap">
+  <div id="dropzone" class="drop">
+    Drop the <b>IdealPurchaseReport</b> file here, or click <b>Load report</b>.<br>
+    <span class="sub">Supports the exported .xls (HTML table) and .csv. Everything stays on your machine.</span>
+  </div>
+
+  <div id="app" class="hide">
+    <div class="controls">
+      <div class="fld"><label>Period of data</label>
+        <select id="months">
+          <option value="1">1 month</option><option value="2">2 months</option>
+          <option value="3" selected>3 months</option><option value="4">4 months</option>
+          <option value="6">6 months</option><option value="9">9 months</option>
+          <option value="12">12 months</option>
+        </select></div>
+      <div class="fld"><label>Sales below % of stock</label>
+        <input type="number" id="thr" value="15" min="0" max="100" step="1" style="width:90px"></div>
+      <div class="fld"><label>Min stock</label>
+        <input type="number" id="minstock" value="1" min="0" step="1" style="width:90px"></div>
+      <div class="fld"><label>Category</label><select id="fcat"></select></div>
+      <div class="fld"><label>Brand</label><select id="fbrand"></select></div>
+      <div class="fld"><label>Vendor</label><select id="fvend"></select></div>
+      <div class="fld"><label>Search</label><input id="q" placeholder="product / id" style="width:190px"></div>
+      <div class="fld"><label>Show</label>
+        <select id="showmode">
+          <option value="all">All results</option>
+          <option value="flag">Flagged only</option>
+          <option value="unflag">Unflagged only</option>
+        </select></div>
+      <div class="fld"><label>&nbsp;</label><button class="primary" id="export">Export CSV</button></div>
+      <div class="fld"><label>&nbsp;</label><button id="reset">Reset removed/flags</button></div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="tblwrap">
+      <table>
+        <thead><tr id="head"></tr></thead>
+        <tbody id="body"></tbody>
+      </table>
+    </div>
+    <div class="pager">
+      <span id="pinfo"></span>
+      <button id="prev">Prev</button><button id="next">Next</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const PAGE = 200;
+let ROWS = [], VIEW = [], page = 0, sortKey = 'ratio', sortDir = 1;
+const removed = new Set(), flagged = new Set();
+
+/* ---------- parsing ---------- */
+function parseCSV(text){
+  const out=[]; let row=[], cur='', q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+    else if(c==='"') q=true;
+    else if(c===','){ row.push(cur); cur=''; }
+    else if(c==='\n'){ row.push(cur); out.push(row); row=[]; cur=''; }
+    else if(c!=='\r') cur+=c;
+  }
+  if(cur!==''||row.length){ row.push(cur); out.push(row); }
+  return out;
+}
+function parseHTMLTable(text){
+  const doc = new DOMParser().parseFromString(text,'text/html');
+  const trs = doc.querySelectorAll('tr');
+  const out=[];
+  trs.forEach(tr=>{
+    const cs=[...tr.querySelectorAll('td,th')].map(td=>td.textContent.trim());
+    if(cs.length) out.push(cs);
+  });
+  return out;
+}
+function num(v){ const n=parseFloat(String(v??'').replace(/[, ]/g,'')); return isFinite(n)?n:0; }
+
+function ingest(matrix){
+  const head = matrix[0].map(h=>h.trim());
+  const idx = name => head.findIndex(h=>h.toLowerCase().replace(/[^a-z]/g,'')===name);
+  const iStock = idx('currentstockindefaultunit');
+  const iSales = idx('salesindefaultunit');
+  if(iStock<0 || iSales<0){
+    alert('Could not find "Current Stock In Default Unit" and "Sales In Default Unit" columns.');
+    return;
+  }
+  const col = {
+    id:idx('productid'), cat:idx('categoryname'), sub:idx('subcategoryname'),
+    brand:idx('brandname'), name:idx('productname'), unit:idx('unittype'),
+    vend:idx('purchasevendor'), cost:idx('lastpurchasepriceindefaultunit'),
+    pdate:idx('purchasedate')
+  };
+  const g=(r,i)=> i>=0 ? (r[i]||'') : '';
+  ROWS = matrix.slice(1).filter(r=>r.length>=head.length-2).map((r,n)=>{
+    const stock=num(r[iStock]), sales=num(r[iSales]);
+    return {
+      key: g(r,col.id) || ('row'+n),
+      id: g(r,col.id), cat:g(r,col.cat), sub:g(r,col.sub), brand:g(r,col.brand),
+      name:g(r,col.name), unit:g(r,col.unit), vendor:g(r,col.vend),
+      cost:num(g(r,col.cost)), pdate:g(r,col.pdate),
+      stock, sales,
+      ratio: stock>0 ? (sales/stock*100) : (sales>0?Infinity:0),
+      excess: stock - sales
+    };
+  });
+}
+
+/* ---------- filtering ---------- */
+function opts(sel, vals, label){
+  sel.innerHTML = `<option value="">All ${label}</option>` +
+    [...new Set(vals.filter(Boolean))].sort().map(v=>`<option>${esc(v)}</option>`).join('');
+}
+const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function compute(){
+  const thr = num(document.getElementById('thr').value);
+  const minstock = num(document.getElementById('minstock').value);
+  const cat = document.getElementById('fcat').value;
+  const brand = document.getElementById('fbrand').value;
+  const vend = document.getElementById('fvend').value;
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  const mode = document.getElementById('showmode').value;
+
+  VIEW = ROWS.filter(r=>{
+    if(removed.has(r.key)) return false;
+    if(r.stock < minstock || r.stock<=0) return false;
+    if(r.ratio >= thr) return false;
+    if(cat && r.cat!==cat) return false;
+    if(brand && r.brand!==brand) return false;
+    if(vend && r.vendor!==vend) return false;
+    if(mode==='flag' && !flagged.has(r.key)) return false;
+    if(mode==='unflag' && flagged.has(r.key)) return false;
+    if(q && !((r.name+' '+r.id+' '+r.brand).toLowerCase().includes(q))) return false;
+    return true;
+  });
+  const m = num(document.getElementById('months').value)||1;
+  VIEW.forEach(r=>{ r.perMonth = r.sales/m; r.cover = r.perMonth>0 ? r.stock/r.perMonth : Infinity; });
+  VIEW.sort((a,b)=>{
+    const x=a[sortKey], y=b[sortKey];
+    if(typeof x==='string') return sortDir*x.localeCompare(y);
+    return sortDir*((x===y)?0:(x<y?-1:1));
+  });
+  page = 0;
+  render();
+}
+
+/* ---------- render ---------- */
+const COLS = [
+  ['id','ID',1],['name','Product',0],['brand','Brand',0],['cat','Category',0],
+  ['unit','Unit',0],['stock','Stock',1],['sales','Sales',1],['ratio','Sales %',1],
+  ['excess','Excess',1],['perMonth','Sales / mo',1],['cover','Months cover',1],
+  ['cost','Unit cost',1],['deadValue','Dead value',1],['vendor','Vendor',0]
+];
+function render(){
+  const thr = num(document.getElementById('thr').value);
+  document.getElementById('head').innerHTML =
+    COLS.map(c=>`<th data-k="${c[0]}" class="${c[2]?'num':''}">${c[1]}${sortKey===c[0]?' <span class="ar">'+(sortDir>0?'▲':'▼')+'</span>':''}</th>`).join('')
+    + '<th class="nos">Actions</th>';
+
+  const start = page*PAGE, slice = VIEW.slice(start, start+PAGE);
+  document.getElementById('body').innerHTML = slice.map(r=>{
+    const dv = r.excess*r.cost;
+    const cls = r.ratio<thr/3 ? 'd0' : (r.ratio<thr*2/3 ? 'd1' : 'd2');
+    return `<tr class="${flagged.has(r.key)?'flagged':''}">
+      <td class="num">${esc(r.id)}</td>
+      <td class="name">${esc(r.name)}<div class="muted" style="font-size:11px">${esc(r.sub)}</div></td>
+      <td>${esc(r.brand)}</td><td>${esc(r.cat)}</td><td>${esc(r.unit)}</td>
+      <td class="num">${r.stock.toFixed(2)}</td>
+      <td class="num">${r.sales.toFixed(2)}</td>
+      <td class="num pct ${cls}">${r.ratio.toFixed(1)}%</td>
+      <td class="num">${r.excess.toFixed(2)}</td>
+      <td class="num">${r.perMonth.toFixed(2)}</td>
+      <td class="num">${isFinite(r.cover)?r.cover.toFixed(1):'∞'}</td>
+      <td class="num">${r.cost?r.cost.toFixed(2):'—'}</td>
+      <td class="num">${dv?dv.toFixed(2):'—'}</td>
+      <td>${esc(r.vendor)||'<span class="muted">—</span>'}</td>
+      <td class="act">
+        <button data-flag="${esc(r.key)}">${flagged.has(r.key)?'Unflag':'Flag'}</button>
+        <button data-rm="${esc(r.key)}">Remove</button>
+      </td></tr>`;
+  }).join('') || `<tr><td colspan="15" class="muted" style="padding:24px;text-align:center">No products match this rule.</td></tr>`;
+
+  const totDead = VIEW.reduce((s,r)=>s+r.excess*r.cost,0);
+  const totUnits = VIEW.reduce((s,r)=>s+r.excess,0);
+  const zero = VIEW.filter(r=>r.sales===0).length;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><label>Products in report</label><b>${ROWS.length.toLocaleString()}</b></div>
+    <div class="stat"><label>Flagged as dead/over</label><b>${VIEW.length.toLocaleString()}</b></div>
+    <div class="stat"><label>Zero sales</label><b>${zero.toLocaleString()}</b></div>
+    <div class="stat"><label>Excess units</label><b>${totUnits.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
+    <div class="stat"><label>Excess value</label><b>${totDead.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
+    <div class="stat"><label>Marked flag / removed</label><b>${flagged.size} / ${removed.size}</b></div>`;
+
+  const pages = Math.max(1, Math.ceil(VIEW.length/PAGE));
+  document.getElementById('pinfo').textContent = `${VIEW.length? start+1:0}–${Math.min(start+PAGE, VIEW.length)} of ${VIEW.length}  ·  page ${page+1}/${pages}`;
+  document.getElementById('prev').disabled = page<=0;
+  document.getElementById('next').disabled = page>=pages-1;
+  save();
+}
+
+/* ---------- events ---------- */
+document.getElementById('body').addEventListener('click',e=>{
+  const f=e.target.dataset.flag, r=e.target.dataset.rm;
+  if(f){ flagged.has(f)?flagged.delete(f):flagged.add(f); compute(); }
+  if(r){ removed.add(r); compute(); }
+});
+document.getElementById('head').addEventListener('click',e=>{
+  const k=e.target.closest('th')?.dataset.k; if(!k) return;
+  if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=1;}
+  compute();
+});
+['months','thr','minstock','fcat','fbrand','fvend','q','showmode'].forEach(id=>{
+  const el=document.getElementById(id);
+  el.addEventListener(el.tagName==='SELECT'?'change':'input', compute);
+});
+document.getElementById('prev').onclick=()=>{page--;render();};
+document.getElementById('next').onclick=()=>{page++;render();};
+document.getElementById('reset').onclick=()=>{ if(confirm('Clear all flags and restore removed rows?')){removed.clear();flagged.clear();compute();} };
+document.getElementById('export').onclick=()=>{
+  const head=['Product ID','Product Name','Brand','Category','Subcategory','Unit','Stock','Sales','Sales %','Excess','Sales per month','Months cover','Unit cost','Excess value','Vendor','Flagged'];
+  const lines=[head.join(',')].concat(VIEW.map(r=>[
+    r.id,r.name,r.brand,r.cat,r.sub,r.unit,r.stock,r.sales,r.ratio.toFixed(2),r.excess.toFixed(2),
+    r.perMonth.toFixed(2),isFinite(r.cover)?r.cover.toFixed(1):'',r.cost,(r.excess*r.cost).toFixed(2),
+    r.vendor,flagged.has(r.key)?'YES':''
+  ].map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(',')));
+  const url=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'}));
+  const a=document.createElement('a'); a.href=url;
+  a.download=`deadstock_${document.getElementById('thr').value}pct_${document.getElementById('months').value}mo.csv`;
+  a.click(); URL.revokeObjectURL(url);
+};
+
+/* ---------- persistence ---------- */
+function save(){ try{ localStorage.setItem('dsc',JSON.stringify({r:[...removed],f:[...flagged]})); }catch(e){} }
+function load(){ try{ const s=JSON.parse(localStorage.getItem('dsc')||'{}');
+  (s.r||[]).forEach(k=>removed.add(k)); (s.f||[]).forEach(k=>flagged.add(k)); }catch(e){} }
+
+/* ---------- file loading ---------- */
+function handle(file){
+  const fr=new FileReader();
+  fr.onload=()=>{
+    const text=fr.result;
+    let matrix;
+    if(/\.csv$/i.test(file.name)) matrix=parseCSV(text);
+    else if(/<t[rd]/i.test(text)) matrix=parseHTMLTable(text);
+    else { alert('Unsupported file. Export the report as .xls (HTML) or .csv.'); return; }
+    if(!matrix || matrix.length<2){ alert('No rows found in file.'); return; }
+    ingest(matrix);
+    if(!ROWS.length) return;
+    document.getElementById('fileinfo').textContent = `${file.name} — ${ROWS.length.toLocaleString()} products`;
+    document.getElementById('dropzone').classList.add('hide');
+    document.getElementById('app').classList.remove('hide');
+    opts(document.getElementById('fcat'), ROWS.map(r=>r.cat),'categories');
+    opts(document.getElementById('fbrand'), ROWS.map(r=>r.brand),'brands');
+    opts(document.getElementById('fvend'), ROWS.map(r=>r.vendor),'vendors');
+    load(); compute();
+  };
+  fr.readAsText(file);
+}
+document.getElementById('file').addEventListener('change',e=>{ if(e.target.files[0]) handle(e.target.files[0]); });
+const dz=document.getElementById('dropzone');
+['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('over');}));
+dz.addEventListener('drop',e=>{ const f=e.dataTransfer.files[0]; if(f) handle(f); });
+dz.addEventListener('click',()=>document.getElementById('file').click());
+</script>
+</body>
+</html>
