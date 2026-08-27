@@ -2,8 +2,25 @@
    Page-specific rules live in each page's own script. */
 
 let ROWS = [];
+const CACHE_V = 2;   // bump when the row shape changes, so stale caches are ignored
 
 /* ---------- helpers ---------- */
+/* Purchase dates come through as MM/DD/YYYY; ISO is accepted as a fallback.
+   A blank or unparseable date returns null — callers must treat that as
+   "unknown", never as old or new. */
+function parseDate(v){
+  const t=String(v??'').trim();
+  if(!t) return null;
+  let m=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m){ const d=new Date(+m[3], +m[1]-1, +m[2]); return isNaN(d)?null:d; }
+  m=t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m){ const d=new Date(+m[1], +m[2]-1, +m[3]); return isNaN(d)?null:d; }
+  const d=new Date(t); return isNaN(d)?null:d;
+}
+const DAY=864e5;
+/* null when there is no usable date — never 0, which would read as "today" */
+function ageInDays(ms){ return ms==null ? null : Math.max(0, Math.floor((Date.now()-ms)/DAY)); }
+
 function num(v){ const n=parseFloat(String(v??'').replace(/[, ]/g,'')); return isFinite(n)?n:0; }
 const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = n => !isFinite(n) ? '∞'
@@ -61,6 +78,7 @@ function ingest(matrix){
       id: g(r,col.id), cat:g(r,col.cat), sub:g(r,col.sub), brand:g(r,col.brand),
       name:g(r,col.name), unit:g(r,col.unit), vendor:g(r,col.vend),
       cost:num(g(r,col.cost)), pdate:g(r,col.pdate),
+      pdateMs: (d=>d?d.getTime():null)(parseDate(g(r,col.pdate))),
       purchUnit:g(r,col.punit), purchCost:num(g(r,col.pcost)),
       stock, sales, stockPiece,
       /* pieces per one default unit — lets us convert an order into boxes/cases */
@@ -95,13 +113,13 @@ function readReport(file, done){
    and the other page asks for the file again. */
 function cacheReport(name){
   try{
-    sessionStorage.setItem('rpt', JSON.stringify({name, rows:ROWS}));
+    sessionStorage.setItem('rpt', JSON.stringify({v:CACHE_V, name, rows:ROWS}));
   }catch(e){ try{ sessionStorage.removeItem('rpt'); }catch(_){} }
 }
 function loadCachedReport(){
   try{
     const s=JSON.parse(sessionStorage.getItem('rpt')||'null');
-    if(s && s.rows && s.rows.length){ ROWS=s.rows; return s.name; }
+    if(s && s.v===CACHE_V && s.rows && s.rows.length){ ROWS=s.rows; return s.name; }
   }catch(e){}
   return null;
 }

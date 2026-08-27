@@ -1,3 +1,4 @@
+html{color-scheme:dark}   /* makes the native date picker render dark */
 :root{
   --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
   --tx:#e6e9ef; --tx2:#9aa3b2; --acc:#4f8cff; --bad:#ff5c5c; --warn:#ffb020; --ok:#33c481;
@@ -43,6 +44,12 @@ tr.vend td{background:var(--panel2);font-weight:650}
 .pct{font-weight:650}
 .pct.d0{color:var(--bad)} .pct.d1{color:var(--warn)} .pct.d2{color:var(--ok)}
 .qty{width:74px;padding:3px 6px;text-align:right;font-variant-numeric:tabular-nums}
+.dt{padding:2px 5px;font-size:12px;width:132px;color:var(--tx2)}
+.dt:hover{border-color:var(--acc)}
+.dt.set{color:var(--acc);border-color:var(--acc)}
+.dtwrap{display:flex;align-items:center;gap:4px;justify-content:flex-end}
+.dtclear{padding:2px 6px;font-size:12px;line-height:1;border-radius:5px;color:var(--tx2)}
+.entered{font-size:11px;color:var(--acc)}
 .qty.edited{border-color:var(--acc);color:var(--acc)}
 .act button{padding:3px 8px;font-size:12px;border-radius:6px}
 .pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 2px;color:var(--tx2)}

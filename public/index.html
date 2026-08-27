@@ -39,6 +39,16 @@
         <input type="number" id="thr" value="15" min="0" max="100" step="1" style="width:90px"></div>
       <div class="fld"><label>Min stock</label>
         <input type="number" id="minstock" value="1" min="0" step="1" style="width:90px"></div>
+      <div class="fld"><label>Last purchased</label>
+        <select id="age" title="Products with no purchase date on file are always kept">
+          <option value="0" selected>Any age</option>
+          <option value="30">Over 30 days ago</option>
+          <option value="60">Over 60 days ago</option>
+          <option value="90">Over 90 days ago</option>
+          <option value="180">Over 6 months ago</option>
+          <option value="365">Over 1 year ago</option>
+          <option value="730">Over 2 years ago</option>
+        </select></div>
       <div class="fld"><label>Category</label><select id="fcat"></select></div>
       <div class="fld"><label>Brand</label><select id="fbrand"></select></div>
       <div class="fld"><label>Vendor</label><select id="fvend"></select></div>
@@ -77,22 +87,52 @@
 const PAGE = 200;
 let VIEW = [], page = 0, sortKey = 'ratio', sortDir = 1;
 const removed = new Set(), flagged = new Set();
+/* Dates the user typed in for products the report left blank. Keyed by product,
+   kept in localStorage, and always distinguishable from a report date. */
+const enteredDates = new Map();
+const TODAY_ISO = new Date().toISOString().slice(0,10);
+const toISO = ms => { const d=new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+/* the date actually in force for a row: what the user typed, else the report's */
+function effectiveMs(r){
+  if(enteredDates.has(r.key)){
+    const t=Date.parse(enteredDates.get(r.key)+'T00:00:00');
+    return isNaN(t)?null:t;
+  }
+  return r.pdateMs;
+}
 const $ = id => document.getElementById(id);
+const plural = (n,w) => `${n} ${w}${n===1?'':'s'} ago`;
+const ageLabel = d => d===0 ? 'today'
+  : d<31  ? plural(d,'day')
+  : d<365 ? plural(Math.round(d/30.4),'month')
+  : `${(d/365).toFixed(1)} years ago`;
 
 /* ---------- the rule ----------
    sales as a % of current stock over the chosen period; anything under the
    threshold is dead or over-stocked. Zero-stock rows can't be overstock. */
-function compute(){
+/* keepPage is passed only by row-level edits (flag, remove, date entry) so the
+   user stays where they were. Filter changes fall through to page 0.
+   Guarded with ===true because this is also used directly as an event handler,
+   which would otherwise hand us an Event object. */
+function compute(keepPage){
   const thr=num($('thr').value), minstock=num($('minstock').value);
   const cat=$('fcat').value, brand=$('fbrand').value, vend=$('fvend').value;
   const q=$('q').value.trim().toLowerCase();
   const mode=$('showmode').value;
+  const minAge=num($('age').value);
   const m=num($('months').value)||1;
 
   VIEW = ROWS.filter(r=>{
     if(removed.has(r.key)) return false;
     if(r.stock < minstock || r.stock<=0) return false;
     if(r.ratio >= thr) return false;
+    /* Age gate: a product bought last week hasn't had a fair chance to sell, so
+       ageing it out removes false positives. Products with NO purchase date on
+       file are never judged by it — they stay in the list on the sales rule
+       alone, which is the only honest thing to do with a missing date. */
+    const age = ageInDays(effectiveMs(r));   // same floored value the column shows, so the two never disagree
+    if(minAge>0 && age!=null && age <= minAge) return false;
     if(cat && r.cat!==cat) return false;
     if(brand && r.brand!==brand) return false;
     if(vend && r.vendor!==vend) return false;
@@ -101,22 +141,33 @@ function compute(){
     if(q && !((r.name+' '+r.id+' '+r.brand).toLowerCase().includes(q))) return false;
     return true;
   });
-  VIEW.forEach(r=>{ r.perMonth=r.sales/m; r.cover = r.perMonth>0 ? r.stock/r.perMonth : Infinity; });
+  VIEW.forEach(r=>{
+    r.perMonth=r.sales/m;
+    r.cover = r.perMonth>0 ? r.stock/r.perMonth : Infinity;
+    r.effMs = effectiveMs(r);
+    r.age = ageInDays(r.effMs);            // null only when nobody has supplied a date
+    r.dateSrc = r.pdateMs!=null ? 'report' : (enteredDates.has(r.key) ? 'user' : null);
+  });
   VIEW.sort((a,b)=>{
     const x=a[sortKey], y=b[sortKey];
+    /* "no date on file" is not a value — park those rows at the end either way */
+    if(x==null && y==null) return 0;
+    if(x==null) return 1; if(y==null) return -1;
     if(typeof x==='string') return sortDir*x.localeCompare(y);
     if(!isFinite(x)&&!isFinite(y)) return 0;
     if(!isFinite(x)) return sortDir; if(!isFinite(y)) return -sortDir;
     return sortDir*((x===y)?0:(x<y?-1:1));
   });
-  page=0; render();
+  const maxPage=Math.max(0, Math.ceil(VIEW.length/PAGE)-1);
+  page = keepPage===true ? Math.min(page, maxPage) : 0;
+  render();
 }
 
 const COLS = [
   ['id','ID',1],['name','Product',0],['brand','Brand',0],['cat','Category',0],
   ['unit','Unit',0],['stock','Stock',1],['sales','Sales',1],['ratio','Sales %',1],
   ['excess','Excess',1],['perMonth','Sales / mo',1],['cover','Months cover',1],
-  ['cost','Unit cost',1],['deadValue','Dead value',1],['vendor','Vendor',0]
+  ['cost','Unit cost',1],['deadValue','Dead value',1],['age','Last purchased',1],['vendor','Vendor',0]
 ];
 function render(){
   const thr=num($('thr').value);
@@ -140,12 +191,24 @@ function render(){
       <td class="num">${isFinite(r.cover)?r.cover.toFixed(1):'∞'}</td>
       <td class="num">${r.cost?r.cost.toFixed(2):'—'}</td>
       <td class="num">${dv?dv.toFixed(2):'—'}</td>
+      <td class="num">${
+        r.dateSrc==='report'
+          ? `${esc(r.pdate)}<div class="muted" style="font-size:11px">${ageLabel(r.age)}</div>`
+        : r.dateSrc==='user'
+          ? `<div class="dtwrap"><input type="date" class="dt set" max="${TODAY_ISO}"
+                 value="${esc(enteredDates.get(r.key))}" data-d="${esc(r.key)}">
+             <button class="dtclear" data-dclear="${esc(r.key)}" title="Clear this date">×</button></div>
+             <div class="entered">entered · ${ageLabel(r.age)}</div>`
+          : `<div class="dtwrap"><input type="date" class="dt" max="${TODAY_ISO}"
+                 data-d="${esc(r.key)}" title="No purchase date in the report — type one in if you know it">
+             </div><div class="muted" style="font-size:11px">no date</div>`
+      }</td>
       <td>${esc(r.vendor)||'<span class="muted">—</span>'}</td>
       <td class="act">
         <button data-flag="${esc(r.key)}">${flagged.has(r.key)?'Unflag':'Flag'}</button>
         <button data-rm="${esc(r.key)}">Remove</button>
       </td></tr>`;
-  }).join('') || `<tr><td colspan="15" class="muted" style="padding:24px;text-align:center">No products match this rule.</td></tr>`;
+  }).join('') || `<tr><td colspan="16" class="muted" style="padding:24px;text-align:center">No products match this rule.</td></tr>`;
 
   const totDead=VIEW.reduce((s,r)=>s+r.excess*r.cost,0);
   const totUnits=VIEW.reduce((s,r)=>s+r.excess,0);
@@ -156,6 +219,8 @@ function render(){
     <div class="stat"><label>Zero sales</label><b>${zero.toLocaleString()}</b></div>
     <div class="stat"><label>Excess units</label><b>${totUnits.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
     <div class="stat"><label>Excess value</label><b>${totDead.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
+    <div class="stat"><label>No purchase date</label><b>${VIEW.filter(r=>r.dateSrc==null).length.toLocaleString()}</b>
+      ${enteredDates.size?`<span class="entered">${enteredDates.size} entered by hand</span>`:''}</div>
     <div class="stat"><label>Marked flag / removed</label><b>${flagged.size} / ${removed.size}</b></div>`;
 
   const pages=Math.max(1,Math.ceil(VIEW.length/PAGE));
@@ -170,7 +235,8 @@ function drawCharts(){
   const box=$('viz');
   if(!$('showviz').checked){ box.classList.add('hide'); return; }
   box.classList.remove('hide');
-  box.innerHTML='<div class="card" id="c1"></div><div class="card" id="c2"></div><div class="card" id="c3"></div>';
+  box.innerHTML='<div class="card" id="c1"></div><div class="card" id="c2"></div>'
+               +'<div class="card" id="c3"></div><div class="card" id="c4"></div>';
 
   const thr=num($('thr').value), mo=num($('months').value)||1;
 
@@ -199,44 +265,88 @@ function drawCharts(){
     cap:tailCap(byVend, vendPinned?'brands':'vendors', vendPinned?'brand':'vendor','excess value'),
     unit:'excess value'});
 
+  /* how long the flagged stock has been sitting since it was last bought in.
+     "no date" is its own bar — it is a real group, not a zero. */
+  const ageBands=[
+    ['no date', r=>r.age==null],
+    ['<1 mo',   r=>r.age!=null && r.age<30],
+    ['1–3 mo',  r=>r.age!=null && r.age>=30  && r.age<90],
+    ['3–6 mo',  r=>r.age!=null && r.age>=90  && r.age<180],
+    ['6–12 mo', r=>r.age!=null && r.age>=180 && r.age<365],
+    ['1 yr+',   r=>r.age!=null && r.age>=365]
+  ];
+  const ageBins=ageBands.map(([short,f])=>{
+    const rows=VIEW.filter(f);
+    const val=rows.reduce((s,r)=>s+r.excess*r.cost,0);
+    return {short, n:rows.length,
+      tip:`<b>${short==='no date'?'No purchase date on file':'Last purchased '+short+' ago'}</b>`
+        +`<div class='t2'>${rows.length.toLocaleString()} products<br>${fmt(val)} excess value</div>`};
+  });
+  colChart($('c4'), ageBins, {title:'How long it has been sitting',
+    cap:'Flagged products by time since last purchase', xlab:'time since last purchase'});
+
   bindTips(box);
 }
 
 /* ---------- events ---------- */
 $('body').addEventListener('click',e=>{
   const f=e.target.dataset.flag, r=e.target.dataset.rm;
-  if(f){ flagged.has(f)?flagged.delete(f):flagged.add(f); compute(); }
-  if(r){ removed.add(r); compute(); }
+  if(f){ flagged.has(f)?flagged.delete(f):flagged.add(f); compute(true); }
+  if(r){ removed.add(r); compute(true); }
+});
+$('body').addEventListener('change',e=>{
+  const k=e.target.dataset.d;
+  if(k!==undefined){
+    const v=e.target.value;
+    /* a cleared field puts the row back to "no date" rather than storing a blank */
+    if(v) enteredDates.set(k,v); else enteredDates.delete(k);
+    compute(true);
+  }
+});
+$('body').addEventListener('click',e=>{
+  const k=e.target.dataset.dclear;
+  if(k!==undefined){ enteredDates.delete(k); compute(true); }
 });
 $('head').addEventListener('click',e=>{
   const k=e.target.closest('th')?.dataset.k; if(!k) return;
   if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=1;}
   compute();
 });
-['months','thr','minstock','fcat','fbrand','fvend','q','showmode'].forEach(id=>{
+['months','thr','minstock','age','fcat','fbrand','fvend','q','showmode'].forEach(id=>{
   const el=$(id);
   el.addEventListener(el.tagName==='SELECT'?'change':'input', compute);
 });
 $('showviz').addEventListener('change',drawCharts);
 $('prev').onclick=()=>{page--;render();};
 $('next').onclick=()=>{page++;render();};
-$('reset').onclick=()=>{ if(confirm('Clear all flags and restore removed rows?')){removed.clear();flagged.clear();compute();} };
+$('reset').onclick=()=>{
+  if(confirm('Clear all flags, restore removed rows, and discard hand-entered dates?')){
+    removed.clear(); flagged.clear(); enteredDates.clear(); compute();
+  }
+};
 $('export').onclick=()=>{
   downloadCSV(
     `deadstock_${$('thr').value}pct_${$('months').value}mo.csv`,
     ['Product ID','Product Name','Brand','Category','Subcategory','Unit','Stock','Sales','Sales %',
-     'Excess','Sales per month','Months cover','Unit cost','Excess value','Vendor','Flagged'],
+     'Excess','Sales per month','Months cover','Unit cost','Excess value','Last purchase date',
+     'Date source','Days since purchase','Vendor','Flagged'],
     VIEW.map(r=>[r.id,r.name,r.brand,r.cat,r.sub,r.unit,r.stock,r.sales,r.ratio.toFixed(2),
       r.excess.toFixed(2),r.perMonth.toFixed(2),isFinite(r.cover)?r.cover.toFixed(1):'',
-      r.cost,(r.excess*r.cost).toFixed(2),r.vendor,flagged.has(r.key)?'YES':''])
+      r.cost,(r.excess*r.cost).toFixed(2),
+      r.dateSrc==='user' ? enteredDates.get(r.key) : r.pdate,
+      r.dateSrc==='user' ? 'entered by hand' : (r.dateSrc==='report' ? 'report' : 'none'),
+      r.age==null?'no date':r.age,
+      r.vendor,flagged.has(r.key)?'YES':''])
   );
 };
 
 /* ---------- persistence ---------- */
-function save(){ try{ localStorage.setItem('dsc',JSON.stringify({r:[...removed],f:[...flagged]})); }catch(e){} }
+function save(){ try{ localStorage.setItem('dsc',
+  JSON.stringify({r:[...removed],f:[...flagged],d:[...enteredDates]})); }catch(e){} }
 function loadState(){ try{
   const s=JSON.parse(localStorage.getItem('dsc')||'{}');
   (s.r||[]).forEach(k=>removed.add(k)); (s.f||[]).forEach(k=>flagged.add(k));
+  (s.d||[]).forEach(([k,v])=>enteredDates.set(k,v));
 }catch(e){} }
 
 /* ---------- boot ---------- */
