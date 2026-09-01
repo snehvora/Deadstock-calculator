@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product Catalog</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<header>
+  <h1>Stock Planner</h1>
+  <nav id="nav"></nav>
+  <span class="sub" id="dbinfo">Loading…</span>
+  <span style="flex:1"></span>
+  <span class="pill acc" id="activepill">No active PO</span>
+  <input type="file" id="file" accept=".xls,.xlsx,.htm,.html,.csv" class="hide">
+  <button id="importbtn">Import report</button>
+</header>
+
+<div class="wrap">
+  <div id="dropzone" class="drop hide">
+    Drop the <b>IdealPurchaseReport</b> file here to fill the product database, or click <b>Import report</b>.<br>
+    <span class="sub">Supports the exported .xls (HTML table) and .csv. Products are stored locally in <code>data/stock.db</code>.</span>
+  </div>
+
+  <div id="cached" class="selbar hide">
+    <span>A report is already loaded in this tab — <b id="cachedname"></b>.</span>
+    <button class="primary" id="importcached">Import it into the database</button>
+  </div>
+
+  <div id="app" class="hide">
+    <div class="controls">
+      <div class="fld"><label>Search</label>
+        <input id="q" placeholder="product / id / brand / vendor" style="width:230px"></div>
+      <div class="fld"><label>Category</label><select id="fcat"></select></div>
+      <div class="fld"><label>Subcategory</label><select id="fsub"></select></div>
+      <div class="fld"><label>Brand</label><select id="fbrand"></select></div>
+      <div class="fld"><label>Vendor</label><select id="fvend"></select></div>
+      <div class="fld"><label>Stock</label>
+        <select id="fstock">
+          <option value="">Any</option>
+          <option value="in">In stock</option>
+          <option value="out">Out of stock</option>
+        </select></div>
+      <div class="fld"><label>Per page</label>
+        <select id="limit">
+          <option>50</option><option selected>100</option><option>250</option><option>500</option>
+        </select></div>
+      <div class="sep"></div>
+      <div class="fld"><label>&nbsp;</label><button id="clearf" class="ghost">Clear filters</button></div>
+    </div>
+
+    <div class="bar2">
+      <span class="pill">Matching <b id="matchcount">0</b></span>
+      <span class="pill">Selected <b id="selcount">0</b></span>
+      <button id="selall" class="ghost">Select all matching</button>
+      <button id="selnone" class="ghost">Clear selection</button>
+      <span style="flex:1"></span>
+      <button id="managepo" class="ghost">Manage POs</button>
+    </div>
+
+    <div class="selbar hide" id="selbar">
+      <span class="n" id="selbarn">0 selected</span>
+      <div class="fld"><label>Add to</label><select id="potarget" style="min-width:190px"></select></div>
+      <div class="fld"><label>Qty each</label>
+        <input type="number" id="addqty" value="1" min="0" step="1" style="width:90px"></div>
+      <button class="primary" id="addsel">Add to purchase order</button>
+      <button id="newpo" class="ghost">New PO…</button>
+    </div>
+
+    <div class="tblwrap">
+      <table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
+    </div>
+    <div class="pager">
+      <span id="pinfo"></span>
+      <button id="prev">Prev</button><button id="next">Next</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+$('nav').innerHTML = navBar('catalog.html');
+
+let offset = 0, sort = 'name', dir = 'asc', TOTAL = 0, PAGEROWS = [], POS = [];
+/* Selection is by product id and survives paging, filtering and sorting, so a
+   basket can be assembled from several different searches before committing. */
+const picked = new Set();
+let onPO = new Set();     // ids already on the active PO, for the row marker
+
+const filters = () => ({
+  q: $('q').value.trim(), cat: $('fcat').value, sub: $('fsub').value,
+  brand: $('fbrand').value, vendor: $('fvend').value, stock: $('fstock').value
+});
+
+/* ---------- loading ---------- */
+let searchTimer;
+function reload(resetPage){
+  if (resetPage) offset = 0;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(load, 120);
+}
+async function load(){
+  const f = filters();
+  try {
+    const data = await api.products({ ...f, sort, dir, limit: $('limit').value, offset });
+    TOTAL = data.total; PAGEROWS = data.rows;
+    if (offset >= TOTAL && TOTAL > 0) { offset = Math.max(0, (Math.ceil(TOTAL / +$('limit').value) - 1) * +$('limit').value); return load(); }
+    render();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+/* ---------- table ---------- */
+const COLS = [
+  ['id','ID',1],['name','Product',0],['brand','Brand',0],['vendor','Vendor',0],
+  ['unit','Unit',1],['stock','Stock',1],['sales','Sales',1],['cost','Unit cost',1],['pdate','Last purchased',1]
+];
+function render(){
+  const allOnPage = PAGEROWS.length && PAGEROWS.every(r => picked.has(r.id));
+  $('head').innerHTML =
+    `<th class="pick"><input type="checkbox" id="pageall" ${allOnPage ? 'checked' : ''} title="Select this page"></th>` +
+    COLS.map(c => `<th data-k="${c[0]}" class="${c[2] ? 'num' : ''}">${c[1]}${
+      sort === c[0] ? ' <span class="ar">' + (dir === 'asc' ? '▲' : '▼') + '</span>' : ''}</th>`).join('') +
+    '<th class="nos">Actions</th>';
+
+  $('body').innerHTML = PAGEROWS.length ? PAGEROWS.map(r => `
+    <tr class="${picked.has(r.id) ? 'sel' : ''} ${onPO.has(r.id) ? 'inpo' : ''}">
+      <td class="pick"><input type="checkbox" data-p="${esc(r.id)}" ${picked.has(r.id) ? 'checked' : ''}></td>
+      <td class="num">${esc(r.product_id)}</td>
+      <td class="name">${esc(r.name)}<div class="muted" style="font-size:11px">${esc(r.cat)}${r.sub ? ' · ' + esc(r.sub) : ''}</div></td>
+      <td>${esc(r.brand) || '<span class="muted">—</span>'}</td>
+      <td>${esc(r.vendor) || '<span class="muted">—</span>'}</td>
+      <td class="num">${esc(r.unit)}</td>
+      <td class="num">${r.stock.toFixed(2)}</td>
+      <td class="num">${r.sales.toFixed(2)}</td>
+      <td class="num">${r.cost ? r.cost.toFixed(2) : '—'}</td>
+      <td class="num muted">${esc(r.pdate) || '—'}</td>
+      <td class="act"><button data-add="${esc(r.id)}">Add</button></td>
+    </tr>`).join('')
+    : `<tr><td colspan="11" class="muted" style="padding:24px;text-align:center">No products match these filters.</td></tr>`;
+
+  counters();
+
+  const lim = +$('limit').value;
+  const pages = Math.max(1, Math.ceil(TOTAL / lim));
+  const page = Math.floor(offset / lim);
+  $('pinfo').textContent = `${TOTAL ? offset + 1 : 0}–${Math.min(offset + lim, TOTAL)} of ${TOTAL.toLocaleString()}  ·  page ${page + 1}/${pages}`;
+  $('prev').disabled = offset <= 0;
+  $('next').disabled = offset + lim >= TOTAL;
+}
+
+function counters(){
+  $('matchcount').textContent = TOTAL.toLocaleString();
+  $('selcount').textContent = picked.size.toLocaleString();
+  $('selbarn').textContent = `${picked.size.toLocaleString()} product${picked.size === 1 ? '' : 's'} selected`;
+  $('selbar').classList.toggle('hide', picked.size === 0);
+}
+
+/* Ticking a box only repaints the row — rebuilding the table would drop the
+   checkbox the user is still clicking through, and stutters on a 500-row page. */
+function syncSel(){
+  $('body').querySelectorAll('tr').forEach(tr => {
+    const cb = tr.querySelector('[data-p]');
+    if (!cb) return;
+    const on = picked.has(cb.dataset.p);
+    cb.checked = on;
+    tr.classList.toggle('sel', on);
+  });
+  const all = $('pageall');
+  if (all) all.checked = PAGEROWS.length > 0 && PAGEROWS.every(r => picked.has(r.id));
+  counters();
+}
+
+/* ---------- purchase orders ---------- */
+async function loadPOs(){
+  try { POS = (await api.listPOs()).pos; } catch (e) { POS = []; }
+  let act = activePO();
+  if (act && !POS.some(p => p.id === act)) { setActivePO(null); act = null; }
+  if (!act && POS.length) { setActivePO(POS[0].id); act = POS[0].id; }
+
+  $('potarget').innerHTML = POS.length
+    ? POS.map(p => `<option value="${p.id}" ${p.id === act ? 'selected' : ''}>${esc(p.name)} (${p.lines})</option>`).join('')
+    : '<option value="">— no purchase orders yet —</option>';
+  $('addsel').disabled = !POS.length;
+
+  const cur = POS.find(p => p.id === act);
+  $('activepill').innerHTML = cur
+    ? `Active PO: <b>${esc(cur.name)}</b> · ${cur.lines} lines`
+    : 'No active PO';
+  await loadPOMembership(act);
+}
+async function loadPOMembership(id){
+  onPO = new Set();
+  if (!id) return render();
+  try {
+    const po = await api.getPO(id);
+    onPO = new Set(po.lines.map(l => l.product_id));
+  } catch (e) {}
+  render();
+}
+
+async function addToPO(ids, qty){
+  const poId = +$('potarget').value;
+  if (!poId) { toast('Create a purchase order first.', 'bad'); return; }
+  if (!ids.length) return;
+  try {
+    const out = await api.addLines(poId, ids.map(id => ({ product_id: id, qty })));
+    setActivePO(poId);
+    toast(`${out.added} line${out.added === 1 ? '' : 's'} added${out.skipped ? ` · ${out.skipped} skipped` : ''}`);
+    picked.clear();
+    await loadPOs();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+/* ---------- events ---------- */
+$('body').addEventListener('change', e => {
+  const id = e.target.dataset.p;
+  if (id === undefined) return;
+  e.target.checked ? picked.add(id) : picked.delete(id);
+  syncSel();
+});
+$('body').addEventListener('click', e => {
+  const id = e.target.dataset.add;
+  if (id) addToPO([id], Math.max(0, num($('addqty').value) || 1));
+});
+$('head').addEventListener('click', e => {
+  if (e.target.id === 'pageall') {
+    const on = e.target.checked;
+    PAGEROWS.forEach(r => on ? picked.add(r.id) : picked.delete(r.id));
+    syncSel();
+    return;
+  }
+  const k = e.target.closest('th')?.dataset.k;
+  if (!k) return;
+  if (sort === k) dir = dir === 'asc' ? 'desc' : 'asc'; else { sort = k; dir = 'asc'; }
+  reload(true);
+});
+$('selall').onclick = async () => {
+  try {
+    const { ids } = await api.productIds(filters());
+    ids.forEach(id => picked.add(id));
+    syncSel();
+    toast(`${ids.length.toLocaleString()} products selected`);
+  } catch (e) { toast(e.message, 'bad'); }
+};
+$('selnone').onclick = () => { picked.clear(); syncSel(); };
+$('addsel').onclick = () => addToPO([...picked], Math.max(0, num($('addqty').value) || 1));
+$('potarget').onchange = () => { setActivePO(+$('potarget').value); loadPOs(); };
+$('managepo').onclick = () => location.href = 'po.html';
+$('newpo').onclick = async () => {
+  const name = prompt('Name for the new purchase order:', 'PO ' + new Date().toISOString().slice(0, 10));
+  if (!name) return;
+  try {
+    const po = await api.createPO({ name });
+    setActivePO(po.id);
+    await loadPOs();
+    toast(`Created “${po.name}”`);
+  } catch (e) { toast(e.message, 'bad'); }
+};
+['q','fcat','fsub','fbrand','fvend','fstock','limit'].forEach(id => {
+  const el = $(id);
+  el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => reload(true));
+});
+$('clearf').onclick = () => {
+  ['q','fcat','fsub','fbrand','fvend','fstock'].forEach(id => $(id).value = '');
+  reload(true);
+};
+$('prev').onclick = () => { offset = Math.max(0, offset - +$('limit').value); load(); };
+$('next').onclick = () => { offset += +$('limit').value; load(); };
+
+/* ---------- import ---------- */
+async function pushRows(name){
+  if (!ROWS.length) { toast('That file had no rows.', 'bad'); return; }
+  toast(`Importing ${ROWS.length.toLocaleString()} products…`);
+  try {
+    const out = await api.import(ROWS, name);
+    toast(`Imported ${out.imported.toLocaleString()} products · ${out.total.toLocaleString()} in the database`);
+    $('cached').classList.add('hide');
+    await boot();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+$('importbtn').onclick = () => $('file').click();
+wireLoader({ input: $('file'), dropzone: $('dropzone'), onload: pushRows });
+$('importcached').onclick = () => pushRows(sessionStorage.getItem('rptname') || 'cached report');
+
+/* ---------- boot ---------- */
+function opts(sel, vals, label){
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">All ${label}</option>` + vals.map(v => `<option>${esc(v)}</option>`).join('');
+  if (vals.includes(cur)) sel.value = cur;
+}
+async function boot(){
+  let f;
+  try { f = await api.facets(); }
+  catch (e) { $('dbinfo').textContent = 'Database unreachable'; toast(e.message, 'bad'); return; }
+
+  $('dbinfo').textContent = `${f.total.toLocaleString()} products in the database`;
+  opts($('fcat'), f.cats, 'categories');
+  opts($('fsub'), f.subs, 'subcategories');
+  opts($('fbrand'), f.brands, 'brands');
+  opts($('fvend'), f.vendors, 'vendors');
+
+  const empty = f.total === 0;
+  $('dropzone').classList.toggle('hide', !empty);
+  $('app').classList.toggle('hide', empty);
+
+  const cachedName = loadCachedReport();
+  if (cachedName) {
+    sessionStorage.setItem('rptname', cachedName);
+    $('cachedname').textContent = `${cachedName} — ${ROWS.length.toLocaleString()} products`;
+    $('cached').classList.remove('hide');
+  }
+  await loadPOs();
+  if (!empty) await load();
+}
+boot();
+</script>
+</body>
+</html>

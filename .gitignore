@@ -3,3 +3,6 @@ node_modules/
 *.xls
 *.xlsx
 *.csv
+
+# local database
+data/

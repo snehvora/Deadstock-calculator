@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purchase Orders</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<header>
+  <h1>Stock Planner</h1>
+  <nav id="nav"></nav>
+  <span class="sub" id="dbinfo"></span>
+  <span style="flex:1"></span>
+  <button class="primary" id="create">New purchase order</button>
+</header>
+
+<div class="wrap">
+  <div class="pos" id="polist"></div>
+  <div class="empty2 hide" id="noPOs">
+    No purchase orders yet. Create one, then pick products from the <a href="catalog.html">Catalog</a>.
+  </div>
+
+  <div id="detail" class="hide">
+    <div class="controls">
+      <div class="fld"><label>PO name</label><input id="pname" style="width:220px"></div>
+      <div class="fld"><label>Vendor / supplier</label><input id="pvendor" style="width:200px"></div>
+      <div class="fld"><label>Status</label>
+        <select id="pstatus">
+          <option value="draft">Draft</option>
+          <option value="sent">Sent</option>
+          <option value="received">Received</option>
+          <option value="cancelled">Cancelled</option>
+        </select></div>
+      <div class="fld"><label>Notes</label><input id="pnotes" style="width:260px" placeholder="delivery terms, reference…"></div>
+      <div class="sep"></div>
+      <div class="fld"><label>&nbsp;</label><button class="primary" id="export">Export…</button></div>
+      <div class="fld"><label>&nbsp;</label><button id="addmore">Add products</button></div>
+      <div class="fld"><label>&nbsp;</label><button id="clear" class="ghost">Empty PO</button></div>
+      <div class="fld"><label>&nbsp;</label><button id="del" class="danger">Delete PO</button></div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="bar2">
+      <button id="rmsel" class="danger" disabled>Remove selected</button>
+      <span class="pill">Selected <b id="selcount">0</b></span>
+      <span style="flex:1"></span>
+      <span class="sub muted">Edit a quantity, cost or note in place — changes save as you type.</span>
+    </div>
+
+    <div class="tblwrap">
+      <table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div id="modal"></div>
+
+<script src="assets/data.js"></script>
+<script src="assets/api.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+$('nav').innerHTML = navBar('po.html');
+
+let POS = [], PO = null;
+const picked = new Set();     // line ids ticked for removal
+
+/* Case / box maths mirrors the "What to order" page: report sizes are in pieces,
+   so convert through pieces-per-default-unit before dividing the order. */
+const perPack = (l, size) => (size > 0 && l.per_default > 0) ? size / l.per_default : 0;
+const packs = (l, size) => { const p = perPack(l, size); return p > 0 ? l.qty / p : 0; };
+
+/* ---------- PO cards ---------- */
+async function loadPOs(keep){
+  POS = (await api.listPOs()).pos;
+  $('noPOs').classList.toggle('hide', POS.length > 0);
+  const act = keep || activePO();
+  $('polist').innerHTML = POS.map(p => `
+    <div class="po ${p.id === act ? 'on' : ''}" data-po="${p.id}">
+      <h4>${esc(p.name)}</h4>
+      <div class="meta">${p.lines} line${p.lines === 1 ? '' : 's'} ·
+        ${p.units.toLocaleString(undefined, { maximumFractionDigits: 0 })} units ·
+        ${p.value.toLocaleString(undefined, { maximumFractionDigits: 0 })} value</div>
+      <div class="tags">
+        <span class="tag ${esc(p.status)}">${esc(p.status)}</span>
+        ${p.vendor ? `<span class="tag">${esc(p.vendor)}</span>` : ''}
+        <span class="tag">updated ${new Date(p.updated_at).toLocaleDateString()}</span>
+      </div>
+    </div>`).join('');
+
+  if (POS.length && !POS.some(p => p.id === act)) return open(POS[0].id);
+  if (act && POS.some(p => p.id === act)) return open(act);
+  PO = null;
+  $('detail').classList.add('hide');
+}
+
+async function open(id){
+  try { PO = await api.getPO(id); }
+  catch (e) { toast(e.message, 'bad'); return; }
+  setActivePO(id);
+  picked.clear();
+  [...document.querySelectorAll('.po')].forEach(el => el.classList.toggle('on', +el.dataset.po === id));
+  $('detail').classList.remove('hide');
+  $('pname').value = PO.name;
+  $('pvendor').value = PO.vendor;
+  $('pstatus').value = PO.status;
+  $('pnotes').value = PO.notes;
+  render();
+}
+
+/* ---------- line table ---------- */
+const HEAD = ['Product','Brand','Vendor','Unit','Stock','Sales','Order qty','Unit cost','Line total','Boxes','Cases','Note'];
+function render(){
+  const allSel = PO.lines.length && PO.lines.every(l => picked.has(l.id));
+  $('head').innerHTML =
+    `<th class="pick"><input type="checkbox" id="allsel" ${allSel ? 'checked' : ''}></th>` +
+    HEAD.map((h, i) => `<th class="${i >= 3 && i <= 10 ? 'num' : ''} nos">${h}</th>`).join('') +
+    '<th class="nos">Actions</th>';
+
+  $('body').innerHTML = PO.lines.length ? PO.lines.map(l => `
+    <tr class="${picked.has(l.id) ? 'sel' : ''}">
+      <td class="pick"><input type="checkbox" data-p="${l.id}" ${picked.has(l.id) ? 'checked' : ''}></td>
+      <td class="name">${esc(l.name)}<div class="muted" style="font-size:11px">${[l.pid, l.cat, l.sub].filter(Boolean).map(esc).join(' · ')}</div></td>
+      <td>${esc(l.brand) || '<span class="muted">—</span>'}</td>
+      <td>${esc(l.vendor) || '<span class="muted">—</span>'}</td>
+      <td class="num">${esc(l.unit)}</td>
+      <td class="num">${l.stock.toFixed(2)}</td>
+      <td class="num">${l.sales.toFixed(2)}</td>
+      <td class="num"><input class="qty" type="number" min="0" step="1" value="${+l.qty.toFixed(2)}" data-f="qty" data-l="${l.id}"></td>
+      <td class="num"><input class="qty" type="number" min="0" step="0.01" value="${+l.unit_cost.toFixed(2)}" data-f="unit_cost" data-l="${l.id}"></td>
+      <td class="num" data-tot="${l.id}">${(l.qty * l.unit_cost).toFixed(2)}</td>
+      <td class="num" data-box="${l.id}">${packs(l, l.box_size) ? packs(l, l.box_size).toFixed(2) : '—'}</td>
+      <td class="num" data-case="${l.id}">${packs(l, l.case_size) ? packs(l, l.case_size).toFixed(2) : '—'}</td>
+      <td><input class="dt" value="${esc(l.note)}" data-f="note" data-l="${l.id}" placeholder="—"></td>
+      <td class="act"><button data-rm="${l.id}">Remove</button></td>
+    </tr>`).join('')
+    : `<tr><td colspan="14" class="muted" style="padding:24px;text-align:center">
+         This purchase order is empty — <a href="catalog.html">pick products from the catalog</a>.</td></tr>`;
+
+  stats();
+  syncSel();
+}
+
+function stats(){
+  const value = PO.lines.reduce((s, l) => s + l.qty * l.unit_cost, 0);
+  const units = PO.lines.reduce((s, l) => s + l.qty, 0);
+  const vendors = new Set(PO.lines.map(l => l.vendor || '(none)')).size;
+  $('stats').innerHTML = `
+    <div class="stat hero"><label>Order value</label><b>${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b></div>
+    <div class="stat"><label>Lines</label><b>${PO.lines.length}</b></div>
+    <div class="stat"><label>Units</label><b>${units.toLocaleString(undefined, { maximumFractionDigits: 0 })}</b></div>
+    <div class="stat"><label>Vendors</label><b>${vendors}</b></div>
+    <div class="stat"><label>Status</label><b style="font-size:16px;text-transform:capitalize">${esc(PO.status)}</b></div>`;
+}
+
+/* Repaint only what selection affects; the row inputs stay put so an in-progress
+   edit is never yanked out from under the cursor. */
+function syncSel(){
+  $('body').querySelectorAll('tr').forEach(tr => {
+    const cb = tr.querySelector('[data-p]');
+    if (!cb) return;
+    const on = picked.has(+cb.dataset.p);
+    cb.checked = on;
+    tr.classList.toggle('sel', on);
+  });
+  const all = $('allsel');
+  if (all) all.checked = PO.lines.length > 0 && PO.lines.every(l => picked.has(l.id));
+  $('selcount').textContent = picked.size;
+  $('rmsel').disabled = picked.size === 0;
+}
+
+/* ---------- editing ---------- */
+let saveTimer;
+function editLine(lineId, field, value){
+  const line = PO.lines.find(l => l.id === lineId);
+  if (!line) return;
+  line[field] = field === 'note' ? value : num(value);
+
+  const cell = (attr, text) => {
+    const td = $('body').querySelector(`[data-${attr}="${lineId}"]`);
+    if (td) td.textContent = text;
+  };
+  cell('tot', (line.qty * line.unit_cost).toFixed(2));
+  cell('box', packs(line, line.box_size) ? packs(line, line.box_size).toFixed(2) : '—');
+  cell('case', packs(line, line.case_size) ? packs(line, line.case_size).toFixed(2) : '—');
+  stats();
+
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await api.updateLine(PO.id, lineId, { [field]: line[field] });
+      loadCards();
+    } catch (e) { toast(e.message, 'bad'); }
+  }, 350);
+}
+$('body').addEventListener('input', e => {
+  const id = +e.target.dataset.l;
+  if (id) editLine(id, e.target.dataset.f, e.target.value);
+});
+$('body').addEventListener('change', e => {
+  const p = e.target.dataset.p;
+  if (p === undefined) return;
+  e.target.checked ? picked.add(+p) : picked.delete(+p);
+  syncSel();
+});
+$('body').addEventListener('click', async e => {
+  const rm = e.target.dataset.rm;
+  if (!rm) return;
+  try { PO = await api.deleteLines(PO.id, [+rm]); picked.delete(+rm); render(); loadCards(); }
+  catch (e2) { toast(e2.message, 'bad'); }
+});
+$('head').addEventListener('change', e => {
+  if (e.target.id !== 'allsel') return;
+  picked.clear();
+  if (e.target.checked) PO.lines.forEach(l => picked.add(l.id));
+  syncSel();
+});
+$('rmsel').onclick = async () => {
+  try { PO = await api.deleteLines(PO.id, [...picked]); picked.clear(); render(); loadCards(); }
+  catch (e) { toast(e.message, 'bad'); }
+};
+$('polist').addEventListener('click', e => {
+  const el = e.target.closest('.po');
+  if (el) open(+el.dataset.po);
+});
+
+/* header fields — debounced so typing a name is one save, not one per keystroke */
+let metaTimer;
+['pname','pvendor','pstatus','pnotes'].forEach(id => {
+  $(id).addEventListener(id === 'pstatus' ? 'change' : 'input', () => {
+    clearTimeout(metaTimer);
+    metaTimer = setTimeout(async () => {
+      try {
+        await api.updatePO(PO.id, { name: $('pname').value, vendor: $('pvendor').value,
+                                    status: $('pstatus').value, notes: $('pnotes').value });
+        PO.status = $('pstatus').value;
+        render(); loadCards();
+      } catch (e) { toast(e.message, 'bad'); }
+    }, 400);
+  });
+});
+
+/* refresh just the cards, keeping the open PO and its unsaved focus */
+async function loadCards(){
+  try {
+    POS = (await api.listPOs()).pos;
+    const act = PO ? PO.id : activePO();
+    $('polist').querySelectorAll('.po').forEach(el => {
+      const p = POS.find(x => x.id === +el.dataset.po);
+      if (!p) return;
+      el.querySelector('.meta').textContent =
+        `${p.lines} line${p.lines === 1 ? '' : 's'} · ${p.units.toLocaleString(undefined, { maximumFractionDigits: 0 })} units · ${p.value.toLocaleString(undefined, { maximumFractionDigits: 0 })} value`;
+      el.querySelector('h4').textContent = p.name;
+      el.classList.toggle('on', p.id === act);
+    });
+  } catch (e) {}
+}
+
+$('create').onclick = async () => {
+  const name = prompt('Name for the new purchase order:', 'PO ' + new Date().toISOString().slice(0, 10));
+  if (!name) return;
+  try { const po = await api.createPO({ name }); setActivePO(po.id); await loadPOs(po.id); toast(`Created “${po.name}”`); }
+  catch (e) { toast(e.message, 'bad'); }
+};
+$('addmore').onclick = () => location.href = 'catalog.html';
+$('clear').onclick = async () => {
+  if (!confirm(`Remove all ${PO.lines.length} lines from “${PO.name}”?`)) return;
+  try { PO = await api.clearLines(PO.id); picked.clear(); render(); loadCards(); }
+  catch (e) { toast(e.message, 'bad'); }
+};
+$('del').onclick = async () => {
+  if (!confirm(`Delete the purchase order “${PO.name}”? This cannot be undone.`)) return;
+  try { await api.deletePO(PO.id); setActivePO(null); PO = null; await loadPOs(); toast('Purchase order deleted'); }
+  catch (e) { toast(e.message, 'bad'); }
+};
+
+/* ---------- export with a column picker ----------
+   Each column knows how to pull its own value from a line, so adding one here
+   is the only change needed. The chosen set is remembered between exports. */
+const EXPORT_COLS = [
+  ['pid',      'Product ID',        l => l.pid,                          1],
+  ['name',     'Product name',      l => l.name,                         1],
+  ['brand',    'Brand',             l => l.brand,                        1],
+  ['cat',      'Category',          l => l.cat,                          0],
+  ['sub',      'Subcategory',       l => l.sub,                          0],
+  ['vendor',   'Vendor',            l => l.vendor,                       1],
+  ['unit',     'Unit',              l => l.unit,                         1],
+  ['qty',      'Order qty',         l => +l.qty.toFixed(2),              1],
+  ['cost',     'Unit cost',         l => +l.unit_cost.toFixed(2),        1],
+  ['total',    'Line total',        l => +(l.qty * l.unit_cost).toFixed(2), 1],
+  ['boxes',    'Boxes',             l => packs(l, l.box_size)  ? packs(l, l.box_size).toFixed(2)  : '', 0],
+  ['cases',    'Cases',             l => packs(l, l.case_size) ? packs(l, l.case_size).toFixed(2) : '', 0],
+  ['stock',    'Current stock',     l => l.stock,                        0],
+  ['sales',    'Sales in period',   l => l.sales,                        0],
+  ['listcost', 'Catalogue cost',    l => l.cost,                         0],
+  ['punit',    'Purchase unit',     l => l.purch_unit,                   0],
+  ['pcost',    'Purchase unit cost',l => l.purch_cost,                   0],
+  ['pdate',    'Last purchased',    l => l.pdate,                        0],
+  ['note',     'Line note',         l => l.note,                         1],
+  ['poname',   'PO name',           (l, po) => po.name,                  0],
+  ['postatus', 'PO status',         (l, po) => po.status,                0],
+  ['povendor', 'PO vendor',         (l, po) => po.vendor,                0],
+  ['ponotes',  'PO notes',          (l, po) => po.notes,                 0],
+  ['exported', 'Exported on',       () => new Date().toLocaleDateString(), 0]
+];
+const COLPREF = 'poExportCols';
+function chosenCols(){
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLPREF) || 'null');
+    if (Array.isArray(saved) && saved.length) return new Set(saved);
+  } catch (e) {}
+  return new Set(EXPORT_COLS.filter(c => c[3]).map(c => c[0]));
+}
+
+$('export').onclick = () => {
+  if (!PO.lines.length) { toast('This purchase order is empty.', 'bad'); return; }
+  const on = chosenCols();
+  $('modal').innerHTML = `
+    <div class="mask" id="mask"><div class="modal">
+      <h3>Export “${esc(PO.name)}” — choose columns</h3>
+      <div class="mbody">
+        <div class="fldrow">
+          <div class="fld"><label>Sort lines by</label>
+            <select id="xsort">
+              <option value="vendor">Vendor, then product</option>
+              <option value="name">Product name</option>
+              <option value="total">Line total (highest first)</option>
+              <option value="qty">Order qty (highest first)</option>
+              <option value="added">Order added to the PO</option>
+            </select></div>
+          <div class="fld"><label>File name</label>
+            <input id="xname" value="${esc(PO.name.replace(/[^\w\- ]+/g, '').trim() || 'purchase_order')}.csv"></div>
+        </div>
+        <label style="display:block;margin-bottom:6px">Columns</label>
+        <div class="cols">${EXPORT_COLS.map(c => `
+          <label class="colopt"><input type="checkbox" data-c="${c[0]}" ${on.has(c[0]) ? 'checked' : ''}>${c[1]}</label>`).join('')}
+        </div>
+        <label class="colopt" style="margin-top:8px"><input type="checkbox" id="xtotal" checked>Append a totals row</label>
+      </div>
+      <div class="mfoot">
+        <div class="left">
+          <button id="xall" class="ghost">All</button>
+          <button id="xnone" class="ghost">None</button>
+          <button id="xdef" class="ghost">Defaults</button>
+        </div>
+        <button id="xcancel">Cancel</button>
+        <button class="primary" id="xgo">Export CSV</button>
+      </div>
+    </div></div>`;
+
+  const boxes = () => [...document.querySelectorAll('[data-c]')];
+  const close = () => $('modal').innerHTML = '';
+  $('xall').onclick  = () => boxes().forEach(b => b.checked = true);
+  $('xnone').onclick = () => boxes().forEach(b => b.checked = false);
+  $('xdef').onclick  = () => boxes().forEach(b => b.checked = !!EXPORT_COLS.find(c => c[0] === b.dataset.c)[3]);
+  $('xcancel').onclick = close;
+  $('mask').onclick = e => { if (e.target.id === 'mask') close(); };
+  $('xgo').onclick = () => {
+    const keys = boxes().filter(b => b.checked).map(b => b.dataset.c);
+    if (!keys.length) { toast('Pick at least one column.', 'bad'); return; }
+    localStorage.setItem(COLPREF, JSON.stringify(keys));
+    const cols = EXPORT_COLS.filter(c => keys.includes(c[0]));
+
+    const lines = [...PO.lines];
+    const by = $('xsort').value;
+    if (by === 'vendor') lines.sort((a, b) => (a.vendor || '~').localeCompare(b.vendor || '~') || a.name.localeCompare(b.name));
+    else if (by === 'name')  lines.sort((a, b) => a.name.localeCompare(b.name));
+    else if (by === 'total') lines.sort((a, b) => b.qty * b.unit_cost - a.qty * a.unit_cost);
+    else if (by === 'qty')   lines.sort((a, b) => b.qty - a.qty);
+    else lines.sort((a, b) => a.created_at - b.created_at || a.id - b.id);
+
+    const body = lines.map(l => cols.map(c => c[2](l, PO)));
+    if ($('xtotal').checked) {
+      /* only the two additive money/quantity columns carry a total; the rest
+         stay blank so the row cannot be misread as data */
+      body.push(cols.map(c =>
+        c[0] === 'qty'   ? +lines.reduce((s, l) => s + l.qty, 0).toFixed(2) :
+        c[0] === 'total' ? +lines.reduce((s, l) => s + l.qty * l.unit_cost, 0).toFixed(2) :
+        c[0] === 'pid'   ? 'TOTAL' : ''));
+    }
+    let fname = $('xname').value.trim() || 'purchase_order.csv';
+    if (!/\.csv$/i.test(fname)) fname += '.csv';
+    downloadCSV(fname, cols.map(c => c[1]), body);
+    close();
+    toast(`Exported ${lines.length} lines · ${cols.length} columns`);
+  };
+};
+
+/* ---------- boot ---------- */
+(async () => {
+  try {
+    const f = await api.facets();
+    $('dbinfo').textContent = `${f.total.toLocaleString()} products in the database`;
+    await loadPOs();
+  } catch (e) { $('dbinfo').textContent = 'Database unreachable'; toast(e.message, 'bad'); }
+})();
+</script>
+</body>
+</html>
