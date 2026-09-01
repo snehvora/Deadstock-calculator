@@ -151,7 +151,9 @@ const countProducts = () => db.prepare('SELECT COUNT(*) c FROM products').get().
 
 const SORTABLE = {
   name:'name', id:'product_id', brand:'brand', vendor:'vendor', cat:'cat', sub:'sub',
-  stock:'stock', sales:'sales', cost:'cost', unit:'unit', pdate:'pdate_ms', updated:'updated_at'
+  stock:'stock', sales:'sales', cost:'cost', unit:'unit', pdate:'pdate_ms', updated:'updated_at',
+  /* the projected columns below, sortable across the whole catalogue */
+  permonth:'per_month', cover:'cover', target:'target', suggested:'suggested'
 };
 
 /* Filters are composed into a parameterised WHERE — values never reach the SQL text.
@@ -177,17 +179,37 @@ function productWhere(f){
   return { sql: w.length ? 'WHERE ' + w.join(' AND ') : '', params: p };
 }
 
+/* Demand projections, using the same rule as the "What to order" page: sales
+   over the report period give a monthly rate, the target is that rate held for
+   the chosen cover horizon, and the suggestion is the shortfall against stock.
+   They are computed in SQL rather than in the page so that sorting by, say,
+   Suggested ranks the whole catalogue instead of only the rows on screen.
+   cover is deliberately NULL for a product with no sales — that is "never runs
+   out", which must not be confused with a cover of zero. */
+function projection(f){
+  const months = Math.max(n(f.months) || 3, 0.01);   // guard against /0
+  const coverFor = Math.max(n(f.cover) || 1, 0);
+  return { months, coverFor };
+}
+
 function listProducts(f){
   const { sql, params } = productWhere(f);
+  const { months, coverFor } = projection(f);
   const total = db.prepare(`SELECT COUNT(*) c FROM products ${sql}`).get(...params).c;
   const col = SORTABLE[f.sort] || 'name';
   const dir = String(f.dir).toLowerCase() === 'desc' ? 'DESC' : 'ASC';
   const limit = Math.min(Math.max(parseInt(f.limit, 10) || 100, 1), 500);
   const offset = Math.max(parseInt(f.offset, 10) || 0, 0);
-  const rows = db.prepare(
-    `SELECT * FROM products ${sql} ORDER BY ${col} ${dir} NULLS LAST, id ASC LIMIT ? OFFSET ?`
-  ).all(...params, limit, offset);
-  return { total, limit, offset, rows };
+  const rows = db.prepare(`
+    WITH p AS (SELECT *, sales / ? AS per_month FROM products)
+    SELECT *,
+           CASE WHEN per_month > 0 THEN stock / per_month END AS cover,
+           per_month * ? AS target,
+           MAX(0, per_month * ? - stock) AS suggested
+    FROM p ${sql}
+    ORDER BY ${col} ${dir} NULLS LAST, id ASC LIMIT ? OFFSET ?`
+  ).all(months, coverFor, coverFor, ...params, limit, offset);
+  return { total, limit, offset, months, coverFor, rows };
 }
 
 /* Every id matching the current filter — lets "select all" cover the whole
@@ -270,20 +292,34 @@ INSERT INTO po_lines (po_id, product_id, qty, unit_cost, note, created_at)
 VALUES (?,?,?,?,?,?)
 ON CONFLICT(po_id, product_id) DO UPDATE SET qty = po_lines.qty + excluded.qty`);
 
-function addLines(poId, items){
+/* opts.mode === 'suggested' quantities each line from the same projection the
+   catalogue shows, using opts.months / opts.cover. That is computed here rather
+   than in the page because "select all matching" can span pages the browser
+   never loaded, so it does not hold a suggestion for every picked product.
+   Well-stocked products project to nothing to order; they are counted in
+   `nothing` and left off the PO rather than added as a meaningless zero line. */
+function addLines(poId, items, opts = {}){
   if (!getPO(poId)) return null;
   const t = now();
-  let added = 0, skipped = 0;
-  const priceOf = db.prepare('SELECT cost FROM products WHERE id = ?');
+  const useSuggested = opts.mode === 'suggested';
+  const { months, coverFor } = projection(opts);
+  let added = 0, skipped = 0, nothing = 0;
+  const productFor = db.prepare('SELECT cost, stock, sales FROM products WHERE id = ?');
   db.exec('BEGIN');
   try {
     for (const it of items || []) {
       const pid = s(it.product_id || it.id);
-      const prod = pid && priceOf.get(pid);
+      const prod = pid && productFor.get(pid);
       if (!prod) { skipped++; continue; }
-      const qty = it.qty === undefined ? 1 : n(it.qty);
+
+      let qty;
+      if (it.qty !== undefined) qty = n(it.qty);
+      else if (useSuggested) qty = Math.max(0, (n(prod.sales) / months) * coverFor - n(prod.stock));
+      else qty = 1;
+      if (useSuggested && qty <= 0) { nothing++; continue; }
+
       const cost = it.unit_cost === undefined ? n(prod.cost) : n(it.unit_cost);
-      addLine.run(poId, pid, qty, cost, s(it.note), t);
+      addLine.run(poId, pid, Math.round(qty * 100) / 100, cost, s(it.note), t);
       added++;
     }
     db.exec('COMMIT');
@@ -292,7 +328,7 @@ function addLines(poId, items){
     throw e;
   }
   touchPO(poId);
-  return { added, skipped, po: getPO(poId) };
+  return { added, skipped, nothing, po: getPO(poId) };
 }
 
 function updateLine(poId, lineId, body){

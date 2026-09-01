@@ -32,7 +32,7 @@ const api = {
   updatePO: (id,b) => apiFetch('/api/pos/' + id, { method:'PATCH', body:b }),
   deletePO: id     => apiFetch('/api/pos/' + id, { method:'DELETE' }),
 
-  addLines: (id, items)     => apiFetch(`/api/pos/${id}/lines`, { method:'POST', body:{ items } }),
+  addLines: (id, items, o)  => apiFetch(`/api/pos/${id}/lines`, { method:'POST', body:{ items, ...o } }),
   updateLine: (id, lid, b)  => apiFetch(`/api/pos/${id}/lines/${lid}`, { method:'PATCH', body:b }),
   deleteLines: (id, ids)    => apiFetch(`/api/pos/${id}/lines`, { method:'DELETE', body:{ ids } }),
   clearLines: id            => apiFetch(`/api/pos/${id}/lines`, { method:'DELETE', body:{ all:true } })

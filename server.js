@@ -87,7 +87,7 @@ async function api(req, res, url){
         if (!seg[4]) {
           if (m === 'POST') {
             const items = Array.isArray(body.items) ? body.items : [];
-            const out = db.addLines(id, items);
+            const out = db.addLines(id, items, body);
             return out ? json(res, 200, out) : json(res, 404, { error: 'No such purchase order' }), true;
           }
           if (m === 'DELETE') {

@@ -42,6 +42,21 @@
           <option value="in">In stock</option>
           <option value="out">Out of stock</option>
         </select></div>
+      <div class="sep"></div>
+      <div class="fld"><label>Period of data</label>
+        <select id="months" title="How many months of sales the report covers">
+          <option value="1">1 month</option><option value="2">2 months</option>
+          <option value="3" selected>3 months</option><option value="4">4 months</option>
+          <option value="6">6 months</option><option value="9">9 months</option>
+          <option value="12">12 months</option>
+        </select></div>
+      <div class="fld"><label>Order enough for</label>
+        <select id="cover" title="Drives the Target and Suggested columns">
+          <option value="0.5">2 weeks</option><option value="1" selected>1 month</option>
+          <option value="1.5">6 weeks</option><option value="2">2 months</option>
+          <option value="3">3 months</option>
+        </select></div>
+      <div class="sep"></div>
       <div class="fld"><label>Per page</label>
         <select id="limit">
           <option>50</option><option selected>100</option><option>250</option><option>500</option>
@@ -62,7 +77,12 @@
     <div class="selbar hide" id="selbar">
       <span class="n" id="selbarn">0 selected</span>
       <div class="fld"><label>Add to</label><select id="potarget" style="min-width:190px"></select></div>
-      <div class="fld"><label>Qty each</label>
+      <div class="fld"><label>Quantity</label>
+        <select id="qtymode" style="min-width:170px">
+          <option value="suggested" selected>Suggested, per product</option>
+          <option value="fixed">Same amount for each</option>
+        </select></div>
+      <div class="fld hide" id="fixedqty"><label>Qty each</label>
         <input type="number" id="addqty" value="1" min="0" step="1" style="width:90px"></div>
       <button class="primary" id="addsel">Add to purchase order</button>
       <button id="newpo" class="ghost">New PO…</button>
@@ -92,7 +112,8 @@ let onPO = new Set();     // ids already on the active PO, for the row marker
 
 const filters = () => ({
   q: $('q').value.trim(), cat: $('fcat').value, sub: $('fsub').value,
-  brand: $('fbrand').value, vendor: $('fvend').value, stock: $('fstock').value
+  brand: $('fbrand').value, vendor: $('fvend').value, stock: $('fstock').value,
+  months: $('months').value, cover: $('cover').value
 });
 
 /* ---------- loading ---------- */
@@ -115,8 +136,17 @@ async function load(){
 /* ---------- table ---------- */
 const COLS = [
   ['id','ID',1],['name','Product',0],['brand','Brand',0],['vendor','Vendor',0],
-  ['unit','Unit',1],['stock','Stock',1],['sales','Sales',1],['cost','Unit cost',1],['pdate','Last purchased',1]
+  ['unit','Unit',1],['stock','Stock',1],['sales','Sales',1],
+  ['permonth','Sales / mo',1],['cover','Cover (mo)',1],['target','Target',1],['suggested','Suggested',1],
+  ['cost','Unit cost',1],['pdate','Last purchased',1]
 ];
+const NCOLS = COLS.length + 2;   // + the tick box and the actions cell
+
+/* A product with no sales never runs out, so its cover comes back NULL and is
+   shown as ∞ — not as 0, which would read as "urgently empty". */
+const coverCell = c => c == null
+  ? '<span class="muted">∞</span>'
+  : `<span class="pct ${c < 1 ? 'd0' : c < 2 ? 'd1' : 'd2'}">${c.toFixed(2)}</span>`;
 function render(){
   const allOnPage = PAGEROWS.length && PAGEROWS.every(r => picked.has(r.id));
   $('head').innerHTML =
@@ -135,11 +165,15 @@ function render(){
       <td class="num">${esc(r.unit)}</td>
       <td class="num">${r.stock.toFixed(2)}</td>
       <td class="num">${r.sales.toFixed(2)}</td>
+      <td class="num">${r.per_month.toFixed(2)}</td>
+      <td class="num">${coverCell(r.cover)}</td>
+      <td class="num">${r.target.toFixed(2)}</td>
+      <td class="num ${r.suggested > 0 ? 'sugg' : 'muted'}">${r.suggested.toFixed(2)}</td>
       <td class="num">${r.cost ? r.cost.toFixed(2) : '—'}</td>
       <td class="num muted">${esc(r.pdate) || '—'}</td>
       <td class="act"><button data-add="${esc(r.id)}">Add</button></td>
     </tr>`).join('')
-    : `<tr><td colspan="11" class="muted" style="padding:24px;text-align:center">No products match these filters.</td></tr>`;
+    : `<tr><td colspan="${NCOLS}" class="muted" style="padding:24px;text-align:center">No products match these filters.</td></tr>`;
 
   counters();
 
@@ -201,14 +235,26 @@ async function loadPOMembership(id){
   render();
 }
 
-async function addToPO(ids, qty){
+/* In "suggested" mode the quantities are left to the server, which applies the
+   same projection the table shows — the selection can span pages this browser
+   never loaded, so it cannot supply a suggestion for every product itself. */
+async function addToPO(ids){
   const poId = +$('potarget').value;
   if (!poId) { toast('Create a purchase order first.', 'bad'); return; }
   if (!ids.length) return;
+
+  const suggested = $('qtymode').value === 'suggested';
+  const qty = Math.max(0, num($('addqty').value) || 1);
+  const items = ids.map(id => suggested ? { product_id: id } : { product_id: id, qty });
+
   try {
-    const out = await api.addLines(poId, ids.map(id => ({ product_id: id, qty })));
+    const out = await api.addLines(poId, items,
+      suggested ? { mode: 'suggested', months: $('months').value, cover: $('cover').value } : {});
     setActivePO(poId);
-    toast(`${out.added} line${out.added === 1 ? '' : 's'} added${out.skipped ? ` · ${out.skipped} skipped` : ''}`);
+    const bits = [`${out.added} line${out.added === 1 ? '' : 's'} added`];
+    if (out.nothing) bits.push(`${out.nothing} already stocked, nothing to order`);
+    if (out.skipped) bits.push(`${out.skipped} skipped`);
+    toast(bits.join(' · '), out.added ? '' : 'bad');
     picked.clear();
     await loadPOs();
   } catch (e) { toast(e.message, 'bad'); }
@@ -223,7 +269,7 @@ $('body').addEventListener('change', e => {
 });
 $('body').addEventListener('click', e => {
   const id = e.target.dataset.add;
-  if (id) addToPO([id], Math.max(0, num($('addqty').value) || 1));
+  if (id) addToPO([id]);
 });
 $('head').addEventListener('click', e => {
   if (e.target.id === 'pageall') {
@@ -246,7 +292,8 @@ $('selall').onclick = async () => {
   } catch (e) { toast(e.message, 'bad'); }
 };
 $('selnone').onclick = () => { picked.clear(); syncSel(); };
-$('addsel').onclick = () => addToPO([...picked], Math.max(0, num($('addqty').value) || 1));
+$('qtymode').onchange = () => $('fixedqty').classList.toggle('hide', $('qtymode').value !== 'fixed');
+$('addsel').onclick = () => addToPO([...picked]);
 $('potarget').onchange = () => { setActivePO(+$('potarget').value); loadPOs(); };
 $('managepo').onclick = () => location.href = 'po.html';
 $('newpo').onclick = async () => {
@@ -259,7 +306,7 @@ $('newpo').onclick = async () => {
     toast(`Created “${po.name}”`);
   } catch (e) { toast(e.message, 'bad'); }
 };
-['q','fcat','fsub','fbrand','fvend','fstock','limit'].forEach(id => {
+['q','fcat','fsub','fbrand','fvend','fstock','limit','months','cover'].forEach(id => {
   const el = $(id);
   el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', () => reload(true));
 });
