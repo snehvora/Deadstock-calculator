@@ -84,11 +84,19 @@ CREATE TABLE IF NOT EXISTS po_lines (
   qty        REAL    NOT NULL DEFAULT 0,
   unit_cost  REAL    NOT NULL DEFAULT 0,
   note       TEXT    NOT NULL DEFAULT '',
+  flag       TEXT    NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   UNIQUE(po_id, product_id)
 );
 CREATE INDEX IF NOT EXISTS ix_lines_po ON po_lines(po_id);
 `);
+
+/* CREATE TABLE IF NOT EXISTS leaves an existing table alone, so a database made
+   before `flag` was added needs the column bolting on. Checked rather than
+   caught, because both drivers report a duplicate column differently. */
+if (!db.prepare('PRAGMA table_info(po_lines)').all().some(c => c.name === 'flag')) {
+  db.exec("ALTER TABLE po_lines ADD COLUMN flag TEXT NOT NULL DEFAULT ''");
+}
 
 const now = () => Date.now();
 const s = v => (v === null || v === undefined) ? '' : String(v);
@@ -259,7 +267,7 @@ function getPO(id){
   const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id);
   if (!po) return null;
   po.lines = db.prepare(`
-    SELECT l.id, l.product_id, l.qty, l.unit_cost, l.note, l.created_at,
+    SELECT l.id, l.product_id, l.qty, l.unit_cost, l.note, l.flag, l.created_at,
            p.product_id AS pid, p.name, p.brand, p.cat, p.sub, p.vendor, p.unit,
            p.cost, p.stock, p.sales, p.pdate, p.purch_unit, p.purch_cost,
            p.box_size, p.case_size, p.per_default
@@ -288,22 +296,29 @@ function deletePO(id){
 /* Adding a product already on the PO bumps its quantity rather than erroring —
    picking the same item from two different searches should accumulate. */
 const addLine = db.prepare(`
-INSERT INTO po_lines (po_id, product_id, qty, unit_cost, note, created_at)
-VALUES (?,?,?,?,?,?)
-ON CONFLICT(po_id, product_id) DO UPDATE SET qty = po_lines.qty + excluded.qty`);
+INSERT INTO po_lines (po_id, product_id, qty, unit_cost, note, flag, created_at)
+VALUES (?,?,?,?,?,?,?)
+ON CONFLICT(po_id, product_id) DO UPDATE SET
+  qty = po_lines.qty + excluded.qty, flag = excluded.flag`);
 
 /* opts.mode === 'suggested' quantities each line from the same projection the
    catalogue shows, using opts.months / opts.cover. That is computed here rather
    than in the page because "select all matching" can span pages the browser
    never loaded, so it does not hold a suggestion for every picked product.
-   Well-stocked products project to nothing to order; they are counted in
-   `nothing` and left off the PO rather than added as a meaningless zero line. */
+   A product the projection has nothing to order for is still added, at a token
+   quantity of 1, and tagged with the reason rather than being dropped: picking
+   something deliberately means you want it on the order, and a buyer who knows
+   why the maths disagrees can raise the quantity or remove the line. The two
+   reasons are held apart because they read very differently — `stocked` sells
+   but is already covered past the target, while `nosales` sold nothing in the
+   report period, which is not the same as being well stocked (a product with
+   zero stock and zero sales lands here). */
 function addLines(poId, items, opts = {}){
   if (!getPO(poId)) return null;
   const t = now();
   const useSuggested = opts.mode === 'suggested';
   const { months, coverFor } = projection(opts);
-  let added = 0, skipped = 0, nothing = 0;
+  let added = 0, skipped = 0, stocked = 0, nosales = 0;
   const productFor = db.prepare('SELECT cost, stock, sales FROM products WHERE id = ?');
   db.exec('BEGIN');
   try {
@@ -312,14 +327,17 @@ function addLines(poId, items, opts = {}){
       const prod = pid && productFor.get(pid);
       if (!prod) { skipped++; continue; }
 
-      let qty;
+      let qty, flag = '';
       if (it.qty !== undefined) qty = n(it.qty);
       else if (useSuggested) qty = Math.max(0, (n(prod.sales) / months) * coverFor - n(prod.stock));
       else qty = 1;
-      if (useSuggested && qty <= 0) { nothing++; continue; }
+      if (useSuggested && qty <= 0) {
+        qty = 1;
+        if (n(prod.sales) > 0) { flag = 'stocked'; stocked++; } else { flag = 'nosales'; nosales++; }
+      }
 
       const cost = it.unit_cost === undefined ? n(prod.cost) : n(it.unit_cost);
-      addLine.run(poId, pid, Math.round(qty * 100) / 100, cost, s(it.note), t);
+      addLine.run(poId, pid, Math.round(qty * 100) / 100, cost, s(it.note), flag, t);
       added++;
     }
     db.exec('COMMIT');
@@ -328,7 +346,7 @@ function addLines(poId, items, opts = {}){
     throw e;
   }
   touchPO(poId);
-  return { added, skipped, nothing, po: getPO(poId) };
+  return { added, skipped, stocked, nosales, flagged: stocked + nosales, po: getPO(poId) };
 }
 
 function updateLine(poId, lineId, body){
@@ -336,6 +354,7 @@ function updateLine(poId, lineId, body){
   if (body.qty !== undefined)       { sets.push('qty = ?');       params.push(n(body.qty)); }
   if (body.unit_cost !== undefined) { sets.push('unit_cost = ?'); params.push(n(body.unit_cost)); }
   if (body.note !== undefined)      { sets.push('note = ?');      params.push(s(body.note)); }
+  if (body.flag !== undefined)      { sets.push('flag = ?');      params.push(s(body.flag)); }
   if (sets.length) {
     params.push(lineId, poId);
     db.prepare(`UPDATE po_lines SET ${sets.join(', ')} WHERE id = ? AND po_id = ?`).run(...params);

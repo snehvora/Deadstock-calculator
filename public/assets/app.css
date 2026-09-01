@@ -109,6 +109,10 @@ tr.inpo td.name::after{content:' • on PO';color:var(--ok);font-size:11px;font-
 .po .meta{font-size:12px;color:var(--tx2)}
 .po .tags{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
 .tag{font-size:11px;border-radius:5px;padding:2px 7px;background:var(--panel2);border:1px solid var(--line);color:var(--tx2)}
+/* the reason tag on a PO line — a button, because clicking it clears the tag */
+.tag.flag{color:var(--warn);border-color:var(--warn);cursor:pointer;font:inherit;font-size:11px;
+  line-height:1.4;vertical-align:middle}
+.tag.flag:hover{background:var(--warn);color:var(--bg);border-color:var(--warn)}
 .tag.draft{color:var(--warn);border-color:var(--warn)}
 .tag.sent{color:var(--acc);border-color:var(--acc)}
 .tag.received{color:var(--ok);border-color:var(--ok)}

@@ -251,8 +251,12 @@ async function addToPO(ids){
     const out = await api.addLines(poId, items,
       suggested ? { mode: 'suggested', months: $('months').value, cover: $('cover').value } : {});
     setActivePO(poId);
+    /* Everything picked goes on the order. Products the projection had nothing
+       to order for land at qty 1 with a tag, so say so here — the quantity is a
+       placeholder to review on the PO, not a suggestion. */
     const bits = [`${out.added} line${out.added === 1 ? '' : 's'} added`];
-    if (out.nothing) bits.push(`${out.nothing} already stocked, nothing to order`);
+    if (out.nosales) bits.push(`${out.nosales} at qty 1 — no sales this period`);
+    if (out.stocked) bits.push(`${out.stocked} at qty 1 — already stocked past the target`);
     if (out.skipped) bits.push(`${out.skipped} skipped`);
     toast(bits.join(' · '), out.added ? '' : 'bad');
     picked.clear();

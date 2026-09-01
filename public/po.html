@@ -110,6 +110,17 @@ async function open(id){
 }
 
 /* ---------- line table ---------- */
+/* Lines the projection had nothing to order for still go on the PO, at qty 1,
+   carrying the reason so the buyer can see which quantities are placeholders
+   rather than demand. Clicking the tag clears it, once that line is dealt with. */
+const FLAGS = {
+  nosales: ['no sales', 'No sales in the report period, so there is no demand to project — added at qty 1.'],
+  stocked: ['already stocked', 'Stock already covers the target for this horizon — added at qty 1.']
+};
+const flagTag = l => FLAGS[l.flag]
+  ? ` <button class="tag flag" data-flag="${l.id}" title="${esc(FLAGS[l.flag][1])} Click to clear.">${esc(FLAGS[l.flag][0])}</button>`
+  : '';
+
 const HEAD = ['Product','Brand','Vendor','Unit','Stock','Sales','Order qty','Unit cost','Line total','Boxes','Cases','Note'];
 function render(){
   const allSel = PO.lines.length && PO.lines.every(l => picked.has(l.id));
@@ -121,7 +132,7 @@ function render(){
   $('body').innerHTML = PO.lines.length ? PO.lines.map(l => `
     <tr class="${picked.has(l.id) ? 'sel' : ''}">
       <td class="pick"><input type="checkbox" data-p="${l.id}" ${picked.has(l.id) ? 'checked' : ''}></td>
-      <td class="name">${esc(l.name)}<div class="muted" style="font-size:11px">${[l.pid, l.cat, l.sub].filter(Boolean).map(esc).join(' · ')}</div></td>
+      <td class="name">${esc(l.name)}${flagTag(l)}<div class="muted" style="font-size:11px">${[l.pid, l.cat, l.sub].filter(Boolean).map(esc).join(' · ')}</div></td>
       <td>${esc(l.brand) || '<span class="muted">—</span>'}</td>
       <td>${esc(l.vendor) || '<span class="muted">—</span>'}</td>
       <td class="num">${esc(l.unit)}</td>
@@ -205,6 +216,15 @@ $('body').addEventListener('change', e => {
   syncSel();
 });
 $('body').addEventListener('click', async e => {
+  const fl = e.target.dataset.flag;
+  if (fl) {
+    const line = PO.lines.find(l => l.id === +fl);
+    if (line) line.flag = '';
+    render();
+    try { await api.updateLine(PO.id, +fl, { flag: '' }); }
+    catch (e2) { toast(e2.message, 'bad'); }
+    return;
+  }
   const rm = e.target.dataset.rm;
   if (!rm) return;
   try { PO = await api.deleteLines(PO.id, [+rm]); picked.delete(+rm); render(); loadCards(); }
@@ -298,6 +318,7 @@ const EXPORT_COLS = [
   ['pcost',    'Purchase unit cost',l => l.purch_cost,                   0],
   ['pdate',    'Last purchased',    l => l.pdate,                        0],
   ['note',     'Line note',         l => l.note,                         1],
+  ['flag',     'Tag',               l => (FLAGS[l.flag] || [''])[0],     0],
   ['poname',   'PO name',           (l, po) => po.name,                  0],
   ['postatus', 'PO status',         (l, po) => po.status,                0],
   ['povendor', 'PO vendor',         (l, po) => po.vendor,                0],
