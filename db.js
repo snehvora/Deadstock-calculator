@@ -1,13 +1,40 @@
 /* Product catalog + purchase orders, stored in a local SQLite file.
-   node:sqlite ships with Node 22, so this adds no dependencies. The file
-   lives next to the server and never leaves the machine. */
-const { DatabaseSync } = require('node:sqlite');
+   The file lives next to the server and never leaves the machine. */
 const path = require('path');
 
 const FILE = process.env.DB_FILE || path.join(__dirname, 'data', 'stock.db');
 require('fs').mkdirSync(path.dirname(FILE), { recursive: true });
 
-const db = new DatabaseSync(FILE);
+/* Two interchangeable SQLite drivers, because hosts differ on Node version:
+   node:sqlite is built into Node 22.5+ and needs no dependency, while older
+   runtimes (plenty of platforms still default to Node 18) fall back to the
+   optional better-sqlite3 package. Both expose the same synchronous
+   prepare/run/get/all surface, so the rest of this file is unaware of which
+   one it got. DB_DRIVER=better-sqlite3 forces the fallback, for testing. */
+function openDatabase(file){
+  const forced = process.env.DB_DRIVER;
+  if (forced !== 'better-sqlite3') {
+    try {
+      const { DatabaseSync } = require('node:sqlite');
+      return { db: new DatabaseSync(file), driver: 'node:sqlite' };
+    } catch (e) {
+      if (forced === 'node:sqlite') throw e;
+      /* fall through only when the runtime lacks the built-in module */
+      if (e.code !== 'ERR_UNKNOWN_BUILTIN_MODULE' && !/node:sqlite/.test(String(e.message))) throw e;
+    }
+  }
+  try {
+    const Database = require('better-sqlite3');
+    return { db: new Database(file), driver: 'better-sqlite3' };
+  } catch (e) {
+    throw new Error(
+      `No SQLite driver available on Node ${process.version}.\n` +
+      `Run on Node 22.5+ (node:sqlite is built in), or install the fallback with ` +
+      `\`npm install better-sqlite3\`.\nUnderlying error: ${e.message}`);
+  }
+}
+
+const { db, driver: DRIVER } = openDatabase(FILE);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA foreign_keys = ON');
 
@@ -296,6 +323,6 @@ function clearLines(poId){
 }
 
 module.exports = {
-  FILE, importProducts, listProducts, productIds, facets, countProducts, clearProducts,
+  FILE, DRIVER, importProducts, listProducts, productIds, facets, countProducts, clearProducts,
   listPOs, createPO, getPO, updatePO, deletePO, addLines, updateLine, deleteLines, clearLines
 };

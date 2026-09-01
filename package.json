@@ -12,5 +12,8 @@
   },
   "dependencies": {
     "xlsx": "^0.18.5"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.10.0"
   }
 }

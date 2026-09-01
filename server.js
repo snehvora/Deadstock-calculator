@@ -135,5 +135,5 @@ http.createServer((req, res) => {
     .catch(err => json(res, 400, { error: err.message || 'Request failed' }));
 }).listen(PORT, () => {
   console.log(`Stock planner listening on http://localhost:${PORT}`);
-  console.log(`Database: ${db.FILE} (${db.countProducts().toLocaleString()} products)`);
+  console.log(`Database: ${db.FILE} (${db.countProducts().toLocaleString()} products, via ${db.DRIVER})`);
 });
