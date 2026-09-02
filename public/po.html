@@ -71,6 +71,43 @@ const picked = new Set();     // line ids ticked for removal
 const perPack = (l, size) => (size > 0 && l.per_default > 0) ? size / l.per_default : 0;
 const packs = (l, size) => { const p = perPack(l, size); return p > 0 ? l.qty / p : 0; };
 
+/* ---------- order unit ----------
+   A vendor may sell by the piece, the box or the case, so each line can be typed
+   in whichever pack suits it. The dropdown only changes the unit on screen: qty
+   is always held in the report's default unit, so the line total, boxes/cases,
+   the PO stats and the export keep meaning exactly what they meant before.
+   The choice is per line and remembered in this browser — it is a data-entry
+   preference, not part of the order, so it stays out of the database. */
+const perPiece = l => l.per_default > 0 ? l.per_default : 1;   // pieces in one default unit
+function unitOpts(l){
+  const pp = perPiece(l);
+  const out = [['default', l.unit || 'Default unit', 1]];      // [key, label, default units per one]
+  if (pp !== 1)        out.push(['piece', 'Piece', 1 / pp]);   // a piece is a fraction of the default unit
+  if (l.box_size  > 0) out.push(['box',  'Box',  l.box_size  / pp]);
+  if (l.case_size > 0) out.push(['case', 'Case', l.case_size / pp]);
+  return out;
+}
+
+const UNITPREF = 'poLineUnits';
+let LINEUNIT = (() => {
+  try { return JSON.parse(localStorage.getItem(UNITPREF) || '{}') || {}; } catch (e) { return {}; }
+})();
+const ukey = l => `${PO.id}:${l.id}`;
+/* A remembered pack the product no longer offers falls back to the default unit,
+   so a re-import that drops a box size cannot leave a line mis-scaled. */
+const unitOf = l => {
+  const opts = unitOpts(l);
+  return opts.find(o => o[0] === LINEUNIT[ukey(l)]) || opts[0];
+};
+const factor  = l => unitOf(l)[2];
+const qtyIn   = l => +(l.qty / factor(l)).toFixed(4);
+const equivOf = l => unitOf(l)[0] === 'default' ? ''
+  : `= ${(+l.qty.toFixed(2)).toLocaleString()} ${l.unit || 'units'}`;
+function setUnit(l, key){
+  LINEUNIT[ukey(l)] = key;
+  try { localStorage.setItem(UNITPREF, JSON.stringify(LINEUNIT)); } catch (e) {}
+}
+
 /* ---------- PO cards ---------- */
 async function loadPOs(keep){
   POS = (await api.listPOs()).pos;
@@ -121,12 +158,14 @@ const flagTag = l => FLAGS[l.flag]
   ? ` <button class="tag flag" data-flag="${l.id}" title="${esc(FLAGS[l.flag][1])} Click to clear.">${esc(FLAGS[l.flag][0])}</button>`
   : '';
 
-const HEAD = ['Product','Brand','Vendor','Unit','Stock','Sales','Order qty','Unit cost','Line total','Boxes','Cases','Note'];
+const HEAD = [['Product',''],['Brand',''],['Vendor',''],['Unit','num'],['Stock','num'],['Sales','num'],
+  ['Order qty','num'],['Order in',''],['Unit cost','num'],['Line total','num'],['Boxes','num'],
+  ['Cases','num'],['Note','']];
 function render(){
   const allSel = PO.lines.length && PO.lines.every(l => picked.has(l.id));
   $('head').innerHTML =
     `<th class="pick"><input type="checkbox" id="allsel" ${allSel ? 'checked' : ''}></th>` +
-    HEAD.map((h, i) => `<th class="${i >= 3 && i <= 10 ? 'num' : ''} nos">${h}</th>`).join('') +
+    HEAD.map(([h, cls]) => `<th class="${cls} nos">${h}</th>`).join('') +
     '<th class="nos">Actions</th>';
 
   $('body').innerHTML = PO.lines.length ? PO.lines.map(l => `
@@ -138,7 +177,12 @@ function render(){
       <td class="num">${esc(l.unit)}</td>
       <td class="num">${l.stock.toFixed(2)}</td>
       <td class="num">${l.sales.toFixed(2)}</td>
-      <td class="num"><input class="qty" type="number" min="0" step="1" value="${+l.qty.toFixed(2)}" data-f="qty" data-l="${l.id}"></td>
+      <td class="num">
+        <input class="qty" type="number" min="0" step="0.01" value="${qtyIn(l)}" data-f="qty" data-l="${l.id}">
+        <div class="equiv" data-eq="${l.id}">${esc(equivOf(l))}</div>
+      </td>
+      <td><select class="uni" data-u="${l.id}">${unitOpts(l).map(o =>
+        `<option value="${o[0]}" ${o[0] === unitOf(l)[0] ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select></td>
       <td class="num"><input class="qty" type="number" min="0" step="0.01" value="${+l.unit_cost.toFixed(2)}" data-f="unit_cost" data-l="${l.id}"></td>
       <td class="num" data-tot="${l.id}">${(l.qty * l.unit_cost).toFixed(2)}</td>
       <td class="num" data-box="${l.id}">${packs(l, l.box_size) ? packs(l, l.box_size).toFixed(2) : '—'}</td>
@@ -146,7 +190,7 @@ function render(){
       <td><input class="dt" value="${esc(l.note)}" data-f="note" data-l="${l.id}" placeholder="—"></td>
       <td class="act"><button data-rm="${l.id}">Remove</button></td>
     </tr>`).join('')
-    : `<tr><td colspan="14" class="muted" style="padding:24px;text-align:center">
+    : `<tr><td colspan="15" class="muted" style="padding:24px;text-align:center">
          This purchase order is empty — <a href="catalog.html">pick products from the catalog</a>.</td></tr>`;
 
   stats();
@@ -186,13 +230,18 @@ let saveTimer;
 function editLine(lineId, field, value){
   const line = PO.lines.find(l => l.id === lineId);
   if (!line) return;
-  line[field] = field === 'note' ? value : num(value);
+  /* the qty box is typed in the line's chosen pack, so scale it back to the
+     default unit before anything — including the save — sees it */
+  if (field === 'note')     line.note = value;
+  else if (field === 'qty') line.qty = Math.round(num(value) * factor(line) * 100) / 100;
+  else                      line[field] = num(value);
 
   const cell = (attr, text) => {
     const td = $('body').querySelector(`[data-${attr}="${lineId}"]`);
     if (td) td.textContent = text;
   };
   cell('tot', (line.qty * line.unit_cost).toFixed(2));
+  cell('eq', equivOf(line));
   cell('box', packs(line, line.box_size) ? packs(line, line.box_size).toFixed(2) : '—');
   cell('case', packs(line, line.case_size) ? packs(line, line.case_size).toFixed(2) : '—');
   stats();
@@ -210,6 +259,19 @@ $('body').addEventListener('input', e => {
   if (id) editLine(id, e.target.dataset.f, e.target.value);
 });
 $('body').addEventListener('change', e => {
+  const u = e.target.dataset.u;
+  if (u) {
+    /* switching the pack restates the same order in a new unit — qty itself
+       does not move, so only the box and its caption are repainted */
+    const line = PO.lines.find(l => l.id === +u);
+    if (!line) return;
+    setUnit(line, e.target.value);
+    const inp = $('body').querySelector(`input[data-f="qty"][data-l="${line.id}"]`);
+    if (inp) inp.value = qtyIn(line);
+    const eq = $('body').querySelector(`[data-eq="${line.id}"]`);
+    if (eq) eq.textContent = equivOf(line);
+    return;
+  }
   const p = e.target.dataset.p;
   if (p === undefined) return;
   e.target.checked ? picked.add(+p) : picked.delete(+p);
@@ -307,6 +369,8 @@ const EXPORT_COLS = [
   ['vendor',   'Vendor',            l => l.vendor,                       1],
   ['unit',     'Unit',              l => l.unit,                         1],
   ['qty',      'Order qty',         l => +l.qty.toFixed(2),              1],
+  ['ounit',    'Order unit',        l => unitOf(l)[1],                   0],
+  ['oqty',     'Qty in order unit', l => qtyIn(l),                       0],
   ['cost',     'Unit cost',         l => +l.unit_cost.toFixed(2),        1],
   ['total',    'Line total',        l => +(l.qty * l.unit_cost).toFixed(2), 1],
   ['boxes',    'Boxes',             l => packs(l, l.box_size)  ? packs(l, l.box_size).toFixed(2)  : '', 0],

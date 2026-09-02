@@ -51,6 +51,8 @@ tr.vend td{background:var(--panel2);font-weight:650}
 .dtclear{padding:2px 6px;font-size:12px;line-height:1;border-radius:5px;color:var(--tx2)}
 .entered{font-size:11px;color:var(--acc)}
 .qty.edited{border-color:var(--acc);color:var(--acc)}
+.uni{padding:3px 6px;font-size:12px;width:104px}
+.equiv{font-size:11px;color:var(--tx2);text-align:right;margin-top:2px;min-height:13px}
 .act button{padding:3px 8px;font-size:12px;border-radius:6px}
 .pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;padding:10px 2px;color:var(--tx2)}
 
